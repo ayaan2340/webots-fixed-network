@@ -12,7 +12,7 @@ export PYTHONPATH="/Applications/Webots.app/Contents/lib/controller/python:$PYTH
 For Mac: You might need to install the x86_64 versions of numpy and opencv-python using these commands  
 pip uninstall numpy  
 pip cache purge  
-arch x86_64 pip install numpy  
+arch -x86_64 pip install numpy  
 
 Replace numpy with opencv-python as well  
 
