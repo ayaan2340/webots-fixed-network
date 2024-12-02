@@ -4,16 +4,20 @@ import multiprocessing
 import pickle
 import subprocess
 import time
+import sys
 
 def run_simulation(port, batch, ready_event, fitness_scores):
     with open(f"genome_data{port}.pkl", "wb") as f:
         for genome_id, genome in batch:
             pickle.dump((genome_id, genome), f)
     f.close()
+    current_dir = os.path.dirname(__file__)
+    file_path = os.path.join(current_dir, "NEATSupervisor.py")
+    # CHANGE FIRST LINE OF SUBPROCESS RUN TO YOUR WEBOTS-CONTROLLER FILE
     result = subprocess.run([
         "/Applications/Webots.app/Contents/MacOS/webots-controller", 
         f"--port={port}", 
-        "/Users/ayaan/Documents/ECar_Sim/WebotsSimulation/controllers/NEATSupervisor/NEATSupervisor.py",
+        file_path,
         "--port", str(port)
     ], capture_output=True, text=True)
     if result.returncode != 0:
@@ -97,15 +101,25 @@ def run_neat(neat_ready_event):
     neat_ready_event.set()
 
 def run_webots(port):
-    subprocess.run(["webots", f"--port={port}", "/Users/ayaan/Documents/ECar_Sim/WebotsSimulation/worlds/firstWorld.wbt"])
+    current_directory = os.path.dirname(__file__)  # Directory of the current script
 
-def run_webots(port):
+    # Construct the path to the Webots world file dynamically by going up one directory and then into "worlds"
+    world_file_path = os.path.join(
+        current_directory, 
+        "..",  # Move up to the parent directory
+        "..",
+        "worlds", 
+        "firstWorld.wbt"
+    )
+    world_file_path = os.path.abspath(world_file_path)  # Ensure the path is absolute
+
+    # Run Webots with the dynamically constructed path
     subprocess.run([
         "webots",
         f"--port={port}",
         "--mode=fast",
         "--no-rendering",
-        "/Users/ayaan/Documents/ECar_Sim/WebotsSimulation/worlds/firstWorld.wbt"
+        world_file_path  # Use the dynamically constructed path
     ])
 
 if __name__ == '__main__':

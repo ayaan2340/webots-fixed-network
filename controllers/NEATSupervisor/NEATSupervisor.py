@@ -291,7 +291,14 @@ def run_simulation(config):
 
     supervisor.teleport_object(supervisor.end_obj, new_red_end_position)
     supervisor.teleport_object(supervisor.green_start, new_green_start_position)
-    batch = loadall(f"/Users/ayaan/Documents/ECar_Sim/WebotsSimulation//genome_data{supervisor.port}.pkl")
+    # Get the parent directory dynamically
+    current_directory = os.path.dirname(__file__)  # Directory of the current script
+    grandpa_directory = os.path.abspath(os.path.join(current_directory, "..", ".."))  # Navigate to parent directory
+    # Construct the path to the genome data file
+    genome_data_path = os.path.join(grandpa_directory, f"genome_data{supervisor.port}.pkl")
+
+    # Load all the genome data
+    batch = loadall(genome_data_path)
     for genome_id, genome in batch:
         try:
             supervisor.reset_simulation_state()
