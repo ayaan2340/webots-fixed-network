@@ -1,6 +1,9 @@
 Install Webots:
 https://cyberbotics.com/doc/guide/installation-procedure
 
+Webots Command Line:  
+https://cyberbotics.com/doc/guide/starting-webots#command-line-arguments
+
 Add these environment variables
 
 export PATH="/Applications/Webots.app/Contents/MacOS:$PATH"  
