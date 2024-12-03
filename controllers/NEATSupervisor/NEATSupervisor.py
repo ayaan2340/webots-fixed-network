@@ -68,6 +68,7 @@ class NEATSupervisor(Supervisor):
         self.max_simulation_time = 15  # seconds
         self.shortest_path = self.shortestPath(self.previous_position, self.end_obj.getField("translation").getSFVec3f())
         self.speed = 0.0
+        self.previous_distance = 0.0
         self.steering_angle = 0.0
         self.distance_travelled = 0.0
         self.initialize_devices()
@@ -103,8 +104,8 @@ class NEATSupervisor(Supervisor):
 
     def preprocess_inputs(self):
         input_list = self.preprocess_camera_data().tolist()
-        # input_list.extend(self.getPos())
-        # input_list.extend(self.end_obj.getPosition())
+        input_list.extend(self.getPos())
+        input_list.extend(self.end_obj.getPosition())
         input_list.append(self.speed / 30.0)
         input_list.append(self.steering_angle / 0.5)
         return np.array(input_list)
@@ -140,6 +141,10 @@ class NEATSupervisor(Supervisor):
         self.teleport_object(self.robot_node, start_position)
         self.robot_node.resetPhysics()
         self.shortest_path = self.shortestPath(start_position, self.end_obj.getField("translation").getSFVec3f())
+        self.previous_distance = np.linalg.norm(
+            np.array(self.end_obj.getField("translation").getSFVec3f()[:2]) -
+            np.array(start_position[:2])
+        )
 
         for _ in range(10):  # Step multiple times to apply changes
             self.step(self.time_step)
@@ -176,7 +181,13 @@ class NEATSupervisor(Supervisor):
             np.array(self.end_obj.getField("translation").getSFVec3f()[:2]) -
             np.array(current_pos[:2])
         )
-        return 1.0 / (distance_to_goal + 0.01)  # Fitness increases as distance decreases
+        add = 0
+        if distance_to_goal < self.previous_distance:
+            add = -distance_to_goal + self.previous_distance
+        else: 
+            add = 0
+        self.previous_distance = distance_to_goal
+        return add
 
     def set_controls(self, outputs):
         max_speed = 30.0
@@ -207,6 +218,7 @@ class NEATSupervisor(Supervisor):
         reached = False
         timeCounter = 0.0
         onRoadCounter = 0.0
+        rightDirection = 0.0
         self.max_simulation_time = self.shortest_path / 4.0
         while self.step(self.time_step) != -1:
             current_time = self.getTime()
@@ -221,12 +233,12 @@ class NEATSupervisor(Supervisor):
             inputs = self.preprocess_inputs()
             outputs = self.net.activate(inputs)
             self.set_controls(outputs)
-
+            rightDirection += self.calculate_distance()
             # Update fitness continuously
         if reached:
-            self.fitness = 50 + 40 * ((self.getTime() - self.start_time) / (self.shortest_path / 30.0)) - 20 * ((timeCounter - onRoadCounter) / timeCounter)
+            self.fitness = 120 + 20 * ((self.getTime() - self.start_time) / (self.shortest_path / 30.0)) - 100 * ((timeCounter - onRoadCounter) / timeCounter)
         else:
-            self.fitness = -3 * ((timeCounter - onRoadCounter) / timeCounter) + 30 * self.calculate_distance()
+            self.fitness = -10 * ((timeCounter - onRoadCounter) / timeCounter) + rightDirection / self.max_simulation_time
         return self.fitness
         
     def shortestPath(self, carPos, endPos):
@@ -300,12 +312,9 @@ def run_simulation(config):
     # Load all the genome data
     batch = loadall(genome_data_path)
     for genome_id, genome in batch:
-        try:
-            supervisor.reset_simulation_state()
-            fitness = supervisor.evaluate_genome(genome, config)
-            genome.fitness = fitness
-        except:
-            print("Error evaluating genome {id}: {e}")
+        supervisor.reset_simulation_state()
+        fitness = supervisor.evaluate_genome(genome, config)
+        genome.fitness = fitness
         print(genome.fitness)
 
 if __name__ == '__main__':

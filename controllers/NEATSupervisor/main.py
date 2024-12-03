@@ -4,7 +4,6 @@ import multiprocessing
 import pickle
 import subprocess
 import time
-import sys
 
 def run_simulation(port, batch, ready_event, fitness_scores):
     with open(f"genome_data{port}.pkl", "wb") as f:
@@ -34,7 +33,7 @@ def run_simulation(port, batch, ready_event, fitness_scores):
     ready_event.set()
     
 def eval_genomes(genomes, config):
-    processor_count = 4
+    processor_count = 10
     batches = []
     batch = []
     ports = []
@@ -95,7 +94,7 @@ def run_neat(neat_ready_event):
     # p.add_reporter(neat.StdOutReporter(False))
     stats = neat.StatisticsReporter()
     p.add_reporter(stats)
-    winner = p.run(eval_genomes, n=1)
+    winner = p.run(eval_genomes, n=10)
     with open('best_genome.pkl', 'wb') as f:
         pickle.dump(winner, f)
     neat_ready_event.set()
@@ -119,13 +118,15 @@ def run_webots(port):
         f"--port={port}",
         "--mode=fast",
         "--no-rendering",
+        "--batch",
+        "--minimize",
         world_file_path  # Use the dynamically constructed path
     ])
 
 if __name__ == '__main__':
     webots_processes = []
     
-    for i in range(4):
+    for i in range(10):
         port = 10000 + i
 
         # Launch each Webots instance
