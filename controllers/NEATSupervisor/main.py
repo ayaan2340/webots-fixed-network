@@ -5,8 +5,9 @@ import pickle
 import subprocess
 import time
 
+generation = 0
 def run_simulation(port, batch, ready_event, fitness_scores):
-    with open(f"genome_data{port}.pkl", "wb") as f:
+    with open(f"genome_data/genome_data{port}.pkl", "wb") as f:
         for genome_id, genome in batch:
             pickle.dump((genome_id, genome), f)
     f.close()
@@ -32,25 +33,41 @@ def run_simulation(port, batch, ready_event, fitness_scores):
 
     ready_event.set()
     
-def eval_genomes(genomes, config):
-    processor_count = 10
+def distribute_genomes_evenly(genomes, processor_count):
+    total_genomes = len(genomes)
+    batch_size = total_genomes // processor_count
+    extra_size = batch_size + 1  # Number of genomes for batches with one extra genome
+    extra_batches = total_genomes % processor_count
     batches = []
-    batch = []
+    
+    genome_index = 0
+    # Distribute batches with the extra genome
+    for _ in range(extra_batches):
+        batch = genomes[genome_index:genome_index + extra_size]
+        batches.append(batch)
+        genome_index += extra_size
+
+    # Distribute batches with the base genome size
+    for _ in range(processor_count - extra_batches):
+        batch = genomes[genome_index:genome_index + batch_size]
+        batches.append(batch)
+        genome_index += batch_size
+
+    return batches
+    
+def eval_genomes(genomes, config):
+    global generation
+    highestScore = 0
+    genomeHighest = 0
+    processor_count = 10
     ports = []
-    batch_size = len(genomes) // processor_count
     for i in range(processor_count):
         port = 10000 + i
         ports.append(port)
         # if not started_apps:
         #     subprocess.run(["webots", f"--port={port}", "/Users/ayaan/Documents/ECar_Sim/WebotsSimulation/worlds/firstWorld.wbt"])
             # $WEBOTS_HOME/Contents/MacOS/webots-controller --port=10000 /Users/ayaan/Documents/ECar_Sim/WebotsSimulation/controllers/NEATSupervisor/NEATSupervisor.py
-    for genome_id, genome in genomes:
-        batch.append((genome_id, genome))
-        if len(batch) == batch_size:
-            batches.append(batch)
-            batch = []
-    if batch:
-        batches.append(batch)
+    batches = distribute_genomes_evenly(genomes, processor_count)
 
     # Run simulations in parallel
     processes = []
@@ -76,6 +93,15 @@ def eval_genomes(genomes, config):
     
     for genome_id, genome in genomes:
         genome.fitness = fitness_scores[genome_id]
+        if fitness_scores[genome_id] > highestScore:
+            highestScore = fitness_scores[genome_id]
+            genomeHighest = genome
+    
+    with open(f"bestBest/lebron{generation}.pkl", "wb") as f:
+        pickle.dump((highestScore, genomeHighest), f)
+    f.close()
+    generation += 1
+
 
 
 
@@ -91,10 +117,10 @@ def run_neat(neat_ready_event):
                          config_path)
 
     p = neat.Population(config)
-    # p.add_reporter(neat.StdOutReporter(False))
+    p.add_reporter(neat.StdOutReporter(True))
     stats = neat.StatisticsReporter()
     p.add_reporter(stats)
-    winner = p.run(eval_genomes, n=10)
+    winner = p.run(eval_genomes, n=300)
     with open('best_genome.pkl', 'wb') as f:
         pickle.dump(winner, f)
     neat_ready_event.set()

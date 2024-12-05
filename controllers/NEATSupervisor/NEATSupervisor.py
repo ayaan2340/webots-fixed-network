@@ -6,6 +6,7 @@ import random
 import pickle
 import os
 import argparse
+import random
 
 class NEATSupervisor(Supervisor):
     def __init__(self):
@@ -71,6 +72,7 @@ class NEATSupervisor(Supervisor):
         self.previous_distance = 0.0
         self.steering_angle = 0.0
         self.distance_travelled = 0.0
+        self.angle_to_end = 0.0
         self.initialize_devices()
 
     def initialize_devices(self):
@@ -103,13 +105,42 @@ class NEATSupervisor(Supervisor):
         return flattened_image
 
     def preprocess_inputs(self):
-        input_list = self.preprocess_camera_data().tolist()
-        input_list.extend(self.getPos())
-        input_list.extend(self.end_obj.getPosition())
+        # input_list = self.preprocess_camera_data().tolist()
+        input_list = []
+        input_list.append(self.get_angle_to_end() / np.pi)
+        carPos = self.getPos()
+        endPos = self.end_obj.getPosition()
+        input_list.append((carPos[0] - endPos[0]) / 150)
+        input_list.append((carPos[1] - endPos[1]) / 150)
         input_list.append(self.speed / 30.0)
         input_list.append(self.steering_angle / 0.5)
+        # if self.port == 10000:
+        #     with open("outputs.txt", "w") as f:
+        #         f.write(str(input_list))
+        #     f.close()
         return np.array(input_list)
-        
+            
+
+    def normalize_angle(self, angle):
+        """Normalize angle to the range [-pi, pi]."""
+        return (angle + np.pi) % (2 * np.pi) - np.pi
+
+    def get_angle_to_end(self):
+        # Get the car's current position
+        car_pos = np.array(self.getPos()[:2])  # x, y position of the car
+        end_pos = np.array(self.end_obj.getField("translation").getSFVec3f()[:2])  # x, y position of the target
+
+        # Calculate the angle to the target position
+        angle_to_end = np.arctan2(end_pos[1] - car_pos[1], end_pos[0] - car_pos[0])
+        # self.robot_node.getField("rotation").setSFRotation([0, 0, 1, angle_to_end])
+        # Get the car's current orientation angle
+        car_rotation_field = self.robot_node.getField("rotation")
+        car_orientation_angle = car_rotation_field.getSFRotation()[3]  # Extract angle (α) from rotation
+        # Calculate the relative angle
+        relative_angle = self.normalize_angle(angle_to_end - car_orientation_angle)
+        self.angle_to_end = relative_angle / np.pi
+        return float(relative_angle)
+
     def get_random_road_position(self):
         """Selects a random road segment and returns its translation position."""
         if not self.roads:
@@ -139,7 +170,9 @@ class NEATSupervisor(Supervisor):
         # Teleport the car back to the green start position
         start_position = self.green_start.getField("translation").getSFVec3f()
         self.teleport_object(self.robot_node, start_position)
+        self.robot_node.getField("rotation").setSFRotation([0, 0, 1, 2 * (random.random() - 0.5) * np.pi])
         self.robot_node.resetPhysics()
+        self.angle_to_end = 0.0
         self.shortest_path = self.shortestPath(start_position, self.end_obj.getField("translation").getSFVec3f())
         self.previous_distance = np.linalg.norm(
             np.array(self.end_obj.getField("translation").getSFVec3f()[:2]) -
@@ -184,15 +217,16 @@ class NEATSupervisor(Supervisor):
         add = 0
         if distance_to_goal < self.previous_distance:
             add = -distance_to_goal + self.previous_distance
+        # elif -0.01 <= distance_to_goal - self.previous_distance <= 0.001:
+        #     add = -0.1
         else: 
-            add = 0
+            add = (-distance_to_goal + self.previous_distance) / 2
         self.previous_distance = distance_to_goal
         return add
 
     def set_controls(self, outputs):
         max_speed = 30.0
         max_steering_angle = 0.5
-
         self.speed = outputs[0] * max_speed
         self.steering_angle = outputs[1] * max_steering_angle
 
@@ -209,17 +243,28 @@ class NEATSupervisor(Supervisor):
            endPos[1] - 2 <= carPos[1] <= endPos[1] + 2):
            return True
         return False
+    
+    def calculate_angle(self):
+        if self.angle_to_end <= -0.7 and self.angle_to_end >= 0.7:
+            return -abs(self.angle_to_end)
+        else:
+            return 0
+
 
     def evaluate_genome(self, genome, config):
         """Evaluate a single genome's fitness."""
-        self.net = neat.nn.FeedForwardNetwork.create(genome, config)
+        # UNCOMMENT FOR FEED FORWARD NETWORK
+        # self.net = neat.nn.FeedForwardNetwork.create(genome, config)
+        # UNCOMMENT FOR RECURRENT NETWORK
+        self.net = neat.nn.RecurrentNetwork.create(genome, config)
         self.start_time = self.getTime()
         self.fitness = 0.0
         reached = False
         timeCounter = 0.0
         onRoadCounter = 0.0
         rightDirection = 0.0
-        self.max_simulation_time = self.shortest_path / 4.0
+        rightAngle = 0
+        self.max_simulation_time = max(12, (self.shortest_path / 5.0))
         while self.step(self.time_step) != -1:
             current_time = self.getTime()
             if self.is_on_road():
@@ -234,11 +279,16 @@ class NEATSupervisor(Supervisor):
             outputs = self.net.activate(inputs)
             self.set_controls(outputs)
             rightDirection += self.calculate_distance()
+            rightAngle += self.calculate_angle()
             # Update fitness continuously
         if reached:
-            self.fitness = 120 + 20 * ((self.getTime() - self.start_time) / (self.shortest_path / 30.0)) - 100 * ((timeCounter - onRoadCounter) / timeCounter)
-        else:
-            self.fitness = -10 * ((timeCounter - onRoadCounter) / timeCounter) + rightDirection / self.max_simulation_time
+            # self.fitness = 50 + 20 * min(1.0, ((self.getTime() - self.start_time) / (self.shortest_path / 30.0))) - 30 * ((timeCounter - onRoadCounter) / timeCounter)
+            self.fitness += 5
+        
+        onRoadPenalty = -10 * ((timeCounter - onRoadCounter) / timeCounter)
+        gettingCloser = 3 * rightDirection / self.max_simulation_time
+        wrongDirectionPenalty = 30 * (rightAngle / self.max_simulation_time)
+        self.fitness = onRoadPenalty + gettingCloser + wrongDirectionPenalty
         return self.fitness
         
     def shortestPath(self, carPos, endPos):
@@ -307,7 +357,7 @@ def run_simulation(config):
     current_directory = os.path.dirname(__file__)  # Directory of the current script
     grandpa_directory = os.path.abspath(os.path.join(current_directory, "..", ".."))  # Navigate to parent directory
     # Construct the path to the genome data file
-    genome_data_path = os.path.join(grandpa_directory, f"genome_data{supervisor.port}.pkl")
+    genome_data_path = os.path.join(grandpa_directory, "genome_data/" f"genome_data{supervisor.port}.pkl")
 
     # Load all the genome data
     batch = loadall(genome_data_path)

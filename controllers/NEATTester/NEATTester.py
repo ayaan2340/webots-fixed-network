@@ -1,11 +1,11 @@
 import neat
-import os
-import pickle
 from controller import Supervisor
 import numpy as np
 import cv2
 import random
-
+import pickle
+import os
+import random
 
 class NEATTester(Supervisor):
     def __init__(self):
@@ -61,8 +61,10 @@ class NEATTester(Supervisor):
         self.max_simulation_time = 15  # seconds
         self.shortest_path = self.shortestPath(self.previous_position, self.end_obj.getField("translation").getSFVec3f())
         self.speed = 0.0
+        self.previous_distance = 0.0
         self.steering_angle = 0.0
         self.distance_travelled = 0.0
+        self.angle_to_end = 0.0
         self.initialize_devices()
 
     def initialize_devices(self):
@@ -95,13 +97,42 @@ class NEATTester(Supervisor):
         return flattened_image
 
     def preprocess_inputs(self):
-        input_list = self.preprocess_camera_data().tolist()
-        input_list.extend(self.getPos())
-        input_list.extend(self.end_obj.getPosition())
-        input_list.append(self.speed)
-        input_list.append(self.steering_angle)
+        # input_list = self.preprocess_camera_data().tolist()
+        input_list = []
+        input_list.append(self.get_angle_to_end() / np.pi)
+        carPos = self.getPos()
+        endPos = self.end_obj.getPosition()
+        input_list.append((carPos[0] - endPos[0]) / 150)
+        input_list.append((carPos[1] - endPos[1]) / 150)
+        input_list.append(self.speed / 30.0)
+        input_list.append(self.steering_angle / 0.5)
+        # if self.port == 10000:
+        #     with open("outputs.txt", "w") as f:
+        #         f.write(str(input_list))
+        #     f.close()
         return np.array(input_list)
-        
+            
+
+    def normalize_angle(self, angle):
+        """Normalize angle to the range [-pi, pi]."""
+        return (angle + np.pi) % (2 * np.pi) - np.pi
+
+    def get_angle_to_end(self):
+        # Get the car's current position
+        car_pos = np.array(self.getPos()[:2])  # x, y position of the car
+        end_pos = np.array(self.end_obj.getField("translation").getSFVec3f()[:2])  # x, y position of the target
+
+        # Calculate the angle to the target position
+        angle_to_end = np.arctan2(end_pos[1] - car_pos[1], end_pos[0] - car_pos[0])
+        # self.robot_node.getField("rotation").setSFRotation([0, 0, 1, angle_to_end])
+        # Get the car's current orientation angle
+        car_rotation_field = self.robot_node.getField("rotation")
+        car_orientation_angle = car_rotation_field.getSFRotation()[3]  # Extract angle (α) from rotation
+        # Calculate the relative angle
+        relative_angle = self.normalize_angle(angle_to_end - car_orientation_angle)
+        self.angle_to_end = relative_angle / np.pi
+        return float(relative_angle)
+
     def get_random_road_position(self):
         """Selects a random road segment and returns its translation position."""
         if not self.roads:
@@ -117,7 +148,6 @@ class NEATTester(Supervisor):
 
     def reset_simulation_state(self):
         """Manually reset the simulation state."""
-        print("Resetting simulation state...")
         # Reset velocities
         self.left_front_wheel.setVelocity(0)
         self.right_front_wheel.setVelocity(0)
@@ -132,8 +162,14 @@ class NEATTester(Supervisor):
         # Teleport the car back to the green start position
         start_position = self.green_start.getField("translation").getSFVec3f()
         self.teleport_object(self.robot_node, start_position)
+        self.robot_node.getField("rotation").setSFRotation([0, 0, 1, 2 * (random.random() - 0.5) * np.pi])
         self.robot_node.resetPhysics()
+        self.angle_to_end = 0.0
         self.shortest_path = self.shortestPath(start_position, self.end_obj.getField("translation").getSFVec3f())
+        self.previous_distance = np.linalg.norm(
+            np.array(self.end_obj.getField("translation").getSFVec3f()[:2]) -
+            np.array(start_position[:2])
+        )
 
         for _ in range(10):  # Step multiple times to apply changes
             self.step(self.time_step)
@@ -145,7 +181,6 @@ class NEATTester(Supervisor):
     def detect_crash(self):
         current_position = self.getPos()
         if current_position is None:
-            print("Position unavailable during crash detection.")
             return True
 
         movement = [abs(current_position[i] - self.previous_position[i]) for i in range(3)]
@@ -154,7 +189,6 @@ class NEATTester(Supervisor):
         if all(m < self.movement_threshold for m in movement):
             self.time_stuck += self.time_step / 1000.0
             if self.time_stuck > self.crash_delay:
-                print("Car is stuck!")
                 return True
         else:
             self.time_stuck = 0.0
@@ -172,12 +206,19 @@ class NEATTester(Supervisor):
             np.array(self.end_obj.getField("translation").getSFVec3f()[:2]) -
             np.array(current_pos[:2])
         )
-        return 1.0 / (distance_to_goal + 0.01)  # Fitness increases as distance decreases
+        add = 0
+        if distance_to_goal < self.previous_distance:
+            add = -distance_to_goal + self.previous_distance
+        # elif -0.01 <= distance_to_goal - self.previous_distance <= 0.001:
+        #     add = -0.1
+        else: 
+            add = (-distance_to_goal + self.previous_distance) / 2
+        self.previous_distance = distance_to_goal
+        return add
 
     def set_controls(self, outputs):
         max_speed = 30.0
         max_steering_angle = 0.5
-
         self.speed = outputs[0] * max_speed
         self.steering_angle = outputs[1] * max_steering_angle
 
@@ -194,14 +235,25 @@ class NEATTester(Supervisor):
            endPos[1] - 2 <= carPos[1] <= endPos[1] + 2):
            return True
         return False
+    
+    def calculate_angle(self):
+        if self.angle_to_end <= -0.7 and self.angle_to_end >= 0.7:
+            return -abs(self.angle_to_end)
+
 
     def evaluate_genome(self, model):
         """Evaluate a single genome's fitness."""
+        # UNCOMMENT FOR FEED FORWARD NETWORK
+        # self.net = neat.nn.FeedForwardNetwork.create(genome, config)
+        # UNCOMMENT FOR RECURRENT NETWORK
+        self.net = model
         self.start_time = self.getTime()
         self.fitness = 0.0
         reached = False
         timeCounter = 0.0
         onRoadCounter = 0.0
+        rightDirection = 0.0
+        self.max_simulation_time = max(12, (self.shortest_path / 5.0))
         while self.step(self.time_step) != -1:
             current_time = self.getTime()
             if self.is_on_road():
@@ -213,15 +265,15 @@ class NEATTester(Supervisor):
                 reached = True
                 break
             inputs = self.preprocess_inputs()
-            outputs = model.activate(inputs)
+            outputs = self.net.activate(inputs)
             self.set_controls(outputs)
-
+            rightDirection += self.calculate_distance()
             # Update fitness continuously
         if reached:
-            self.fitness = 50 + 10 * ((self.getTime() - self.start_time) / (self.shortest_path * 30.0)) + 20 * (onRoadCounter / timeCounter)
-        else:
-            self.fitness = 5 * (onRoadCounter / timeCounter) + 3 * self.calculate_distance()
-        print(f"Fitness: {self.fitness}")
+            # self.fitness = 50 + 20 * min(1.0, ((self.getTime() - self.start_time) / (self.shortest_path / 30.0))) - 30 * ((timeCounter - onRoadCounter) / timeCounter)
+            self.fitness += 5
+        
+        self.fitness = -10 * ((timeCounter - onRoadCounter) / timeCounter) + 30 * rightDirection / self.shortest_path
         return self.fitness
         
     def shortestPath(self, carPos, endPos):
@@ -265,7 +317,7 @@ class NEATTester(Supervisor):
                     return True
         return False
 
-def eval_genomes(model):
+def eval_genomes(model, config):
     print("Starting a new generation...")
     # Teleport redEnd and greenStart at the start of each generation
     print("Teleporting objects for new generation...")
@@ -296,11 +348,12 @@ def run_neat():
     config = neat.Config(neat.DefaultGenome, neat.DefaultReproduction,
                          neat.DefaultSpeciesSet, neat.DefaultStagnation,
                          config_path)
-    with open('best_genome.pkl', 'rb') as f:
-        genome = pickle.load(f)
-    model = neat.nn.FeedForwardNetwork.create(genome, config)
+    with open('/Users/ayaan/Documents/ECar_Sim/WebotsSimulaiton_Multithreaded/bestBest/lebron93.pkl', 'rb') as f:
+        fitness_score, genome = pickle.load(f)
+        print(f"Trained fitness score: {fitness_score}")
+    model = neat.nn.RecurrentNetwork.create(genome, config)
     for i in range(50):
-        eval_genomes(model)
+        eval_genomes(model, config)
 
 
 if __name__ == '__main__':

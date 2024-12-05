@@ -1,6 +1,5 @@
 #VRML_SIM R2023b utf8
 
-EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2023b/projects/objects/backgrounds/protos/TexturedBackground.proto"
 EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2023b/projects/objects/backgrounds/protos/TexturedBackgroundLight.proto"
 EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2023b/projects/objects/floors/protos/RectangleArena.proto"
 EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2023b/projects/objects/road/protos/RoadIntersection.proto"
@@ -14,10 +13,8 @@ WorldInfo {
   basicTimeStep 10
 }
 Viewpoint {
-  orientation 0.18096050942608105 -0.5610855041183916 -0.8077353224271324 5.523385722051044
-  position -50.36795153913075 -46.48382053117258 40.6661639606391
-}
-TexturedBackground {
+  orientation 0.10932152567143531 -0.12414772067852675 -0.9862231732600873 4.825427674873052
+  position -10.523372253422547 -70.36928162727206 16.809926830172703
 }
 TexturedBackgroundLight {
 }
@@ -738,12 +735,12 @@ DEF car BmwX5 {
   hidden position2_0_1 0.0010714084849187172
   hidden position_0_2 1.0661333120501757
   hidden position_0_3 0.89575551510613
-  hidden rotation_1 0.24095538715976594 -0.9405586668694763 -0.239353077221499 4.649728876292331
-  hidden rotation_2 -0.24100300311304157 0.9429696578609916 -0.22962094164953575 4.607426567516831
+  hidden rotation_1 0.2409553871597658 -0.9405586668694763 -0.2393530772214991 4.6497288762923334
+  hidden rotation_2 -0.2410030031130415 0.9429696578609919 -0.22962094164953575 4.607426567516832
   hidden rotation_3 0 -1 0 4.704219085355313
   hidden rotation_4 0 -1 0 3.604242214050586
   translation -0.8727880817534354 1.1157522995507705 0.16806210016159356
-  rotation 0.005113138892478476 -0.006050368161454012 0.9999686239356599 2.2545754200860957
+  rotation 0.015390988559578283 0 -0.999881551720582 1.220380678424569
   name "car"
   controller "<extern>"
   supervisor TRUE
@@ -768,8 +765,11 @@ DEF car BmwX5 {
           ]
         }
       ]
-      fieldOfView 1
-      height 36
     }
+  ]
+}
+Background {
+  skyColor [
+    1 1 1
   ]
 }
