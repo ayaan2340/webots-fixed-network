@@ -304,7 +304,7 @@ class Simulation:
         self.distance_travelled += np.sqrt(dx**2 + dy**2)
 
         self.time += self.time_step
-        return not self.reached_goal()
+        return self.am_on_road()
 
     def reached_goal(self) -> bool:
         """Check if car has reached the goal."""
