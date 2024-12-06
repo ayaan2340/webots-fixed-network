@@ -27,3 +27,6 @@ https://github.com/cyberbotics/webots/wiki/Qt-compilation
 
 For Mac: You might need to install openssl-1.0.2  
 https://github.com/cyberbotics/webots/wiki/OpenSSL-compilation  
+
+Linux help for display:
+https://stackoverflow.com/questions/58208419/does-webots-have-headless-mode
