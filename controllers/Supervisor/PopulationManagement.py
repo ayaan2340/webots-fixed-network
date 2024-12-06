@@ -112,20 +112,30 @@ class PopulationManager:
                 f"--port={port}",
                 "SimulationManager.py",
                 "--port", str(port)
-            ], capture_output=True, text=True, check=True)
+            ], 
+                capture_output=True, 
+                text=True, 
+                check=True,
+            )
+        except subprocess.CalledProcessError as e:
+            # Capture both stdout and stderr
+            error_output = e.stderr if e.stderr else e.stdout
+            # Log the error if needed
+            with open('error.log', 'w') as f:
+                f.write(f"Process failed with exit code {e.returncode}\n")
+                f.write(f"Error output:\n{error_output}")
 
-            # Parse fitness scores from output
-            fitness_values = list(map(float, result.stdout.splitlines()))
+            ## Raise a new exception with the detailed error info
+            raise RuntimeError(f"Subprocess failed with exit code {e.returncode}. Error: {error_output}") from e
+        # Parse fitness scores from output
+        fitness_values = list(map(float, result.stdout.splitlines()))
 
-            # Read genomes and update fitness dictionary
-            genome_dir = Path(f"genome_data/genome_data{port}")
-            for i, genome_path in enumerate(sorted(genome_dir.glob("*.h5"))):
-                genome = RecurrentNetwork.load(genome_path)
-                fitness_dict[genome.genome_id] = fitness_values[i]
-        except Exception as e:
-            print(f"Error in simulation process on port {port}: {e}")
-        finally:
-            ready_event.set()
+        # Read genomes and update fitness dictionary
+        genome_dir = Path(f"genome_data/genome_data{port}")
+        for i, genome_path in enumerate(sorted(genome_dir.glob("*.h5"))):
+            genome = RecurrentNetwork.load(genome_path)
+            fitness_dict[genome.genome_id] = fitness_values[i]
+        ready_event.set()
 
     def evaluate_fitness(self):
         """Parallel fitness evaluation"""
@@ -203,7 +213,7 @@ class PopulationManager:
             parent2 = self.tournament_selection()
 
             # Create child through crossover
-            child = parent1.crossover(parent2)
+            child = parent1.crossover(parent2, len(new_population))
 
             # Mutate child
             child.mutate()

@@ -60,13 +60,14 @@ class RecurrentNetwork(nn.Module):
         """Reset the hidden state to zero."""
         self.hidden_state = torch.zeros(self.hidden_size)
 
-    def make_child(self):
+    def make_child(self, genome_id):
         # Create a new network with the same architecture
         return RecurrentNetwork(
             input_size=self.input_layer.in_features,
             hidden_size=self.hidden_size,
             output_size=self.output_layer.out_features,
-            crossover_prob=self.crossover_prob
+            crossover_prob=self.crossover_prob,
+            genome_id=genome_id,
         )
     
     def mutate(self):
@@ -76,14 +77,12 @@ class RecurrentNetwork(nn.Module):
             mutation_rate: Probability of a weight being mutated
             mutation_strength: Magnitude of weight changes
         """
-        offspring = self.make_child()
-
-        for param in offspring.parameters():
-            mask = torch.rand(param.data.shape) < offspring.mutation_rate
-            mutation = torch.randn(param.data.shape) * offspring.mutation_strength
+        for param in self.parameters():
+            mask = torch.rand(param.data.shape) < self.mutation_rate
+            mutation = torch.randn(param.data.shape) * self.mutation_strength
             param.data[mask] += mutation[mask]
     
-    def crossover(self, other_network):
+    def crossover(self, other_network, genome_id):
         """
         Perform crossover with another network.
         
@@ -101,7 +100,7 @@ class RecurrentNetwork(nn.Module):
         ]):
             raise ValueError("Networks must have identical architecture for crossover")
         
-        offspring = self.make_child()
+        offspring = self.make_child(genome_id)
         
         # Perform crossover for each parameter
         for (name1, param1), (name2, param2) in zip(

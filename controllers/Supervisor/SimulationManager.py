@@ -18,7 +18,6 @@ Would you like me to elaborate on any part of the implementation or explain the 
 '''
 
 from controller import Supervisor
-import numpy as np
 import cv2
 import random
 import pickle
