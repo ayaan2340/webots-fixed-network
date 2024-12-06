@@ -1,18 +1,46 @@
 # simulation_manager.py
+from dataclasses import dataclass
+from typing import Tuple
 import numpy as np
 from simulation import Simulation
 from RecurrentNetwork import RecurrentNetwork
-from pathlib import Path
-import os
+
+
+@dataclass
+class SyllabusFrame:
+    inputs: np.ndarray
+    outputs: np.ndarray
+    position: Tuple[float, float]
+    rotation: float
+    success: bool
+    fitness: float  # Store the fitness of the run this frame came from
 
 
 class SimulationManager:
-    def __init__(self, process_id=0):
+    def __init__(self, process_id=0, syllabus_manager=None):
         self.simulation = None
         self.max_simulation_time = 1000  # Maximum frames for simulation
         self.process_id = process_id
         self.num_trials = 5
+        self.syllabus_manager = syllabus_manager
+        self.frame_sample_rate = 10
         self.reset_simulation_state()
+
+    def record_frame(self, genome, inputs, outputs, buffer) -> None:
+        """Record current frame if conditions are met."""
+        # Only record every Nth frame to reduce memory usage
+        if int(self.simulation.time / self.simulation.time_step) % self.frame_sample_rate != 0:
+            return
+
+        frame = SyllabusFrame(
+            inputs=inputs,
+            outputs=outputs,
+            position=self.simulation.car.position,
+            rotation=self.simulation.car.rotation,
+            success=False,  # Will be updated later if run is successful
+            fitness=0.0     # Will be updated later with final fitness
+        )
+        buffer.add_frame(genome.genome_id, frame)
 
     def reset_simulation_state(self):
         """Reset the simulation to initial state."""
@@ -32,12 +60,13 @@ class SimulationManager:
         self.simulation.previous_distance = current_distance
         return reward
 
-    def evaluate_single_trial(self, genome):
-        """Evaluate a single trial based on distance traveled from start."""
-        genome.hidden_state = None  # Reset RNN state
+    def evaluate_single_trial(self, genome, frame_buffer) -> float:
+        """Evaluate a single trial and record frames."""
+        genome.hidden_state = None
         start_time = self.simulation.time
         prev_time = 0
         time_on_road = 0
+        success = False
 
         while self.simulation.time < self.max_simulation_time:
             if self.simulation.am_on_road():
@@ -47,26 +76,42 @@ class SimulationManager:
             # Get inputs and run network
             inputs = self.simulation.get_inputs()
             outputs = genome.forward(inputs)
-            self.simulation.set_controls(outputs)
 
-            # If simulation step fails (crash), end trial and return distance traveled
+            # Record frame if buffer is provided
+            if frame_buffer is not None:
+                self.record_frame(genome, inputs, outputs, frame_buffer)
+
+            self.simulation.set_controls(outputs)
             if not self.simulation.step():
                 break
 
-        # If time runs out, return distance traveled
-        on_road = time_on_road / self.simulation.time
-        return self.calculate_distance_from_start() * on_road
+            if self.simulation.reached_goal():
+                success = True
+                break
 
-    def evaluate_genome(self, genome):
-        """Evaluate a genome over multiple trials and return median fitness."""
-        trial_fitnesses = []
+        # Calculate fitness
+        on_road_ratio = time_on_road / (self.simulation.time - start_time)
+        distance_fitness = self.calculate_distance_from_start()
+        trial_fitness = distance_fitness * on_road_ratio
 
-        for trial in range(self.num_trials):
+        # Update success status and fitness for all recorded frames
+        if frame_buffer is not None:
+            for frame in frame_buffer.frames.get(genome.genome_id, []):
+                frame.success = success
+                frame.fitness = trial_fitness
+
+        return trial_fitness
+
+    def evaluate_genome(self, genome, frame_buffer=None) -> float:
+        """Evaluate a genome over multiple trials."""
+        total_fitness = 0.0
+
+        for _ in range(self.num_trials):
             self.reset_simulation_state()
-            trial_fitness = self.evaluate_single_trial(genome)
-            trial_fitnesses.append(trial_fitness)
+            trial_fitness = self.evaluate_single_trial(genome, frame_buffer)
+            total_fitness += trial_fitness
 
-        return float(np.mean(trial_fitnesses))
+        return total_fitness / self.num_trials
 
     def visualize_network(self, genome: RecurrentNetwork, save_path: str = "visualization.html"):
         # Load the HTML template
