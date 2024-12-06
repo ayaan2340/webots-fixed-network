@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html>
+<body>
+  <div style="text-align: center;">
+    <canvas id="simulationCanvas" width="800" height="800" style="border:1px solid #000;"></canvas>
+    <br>
+    <button onclick="startAnimation()">Play</button>
+    <button onclick="pauseAnimation()">Pause</button>
+    <button onclick="resetAnimation()">Reset</button>
+    <span id="frameCounter"></span>
+  </div>
+
+  <script>
+    const canvas = document.getElementById('simulationCanvas');
+    const ctx = canvas.getContext('2d');
+    const scale = 4;
+    
+    let animationId = null;
+    let isPaused = true;
+    let frameIndex = 0;
+
+    function drawRoad(road) {
+      ctx.fillStyle = '#333';
+      const x = road.position[0] * scale;
+      const y = road.position[1] * scale;
+      const width = road.size[0] * scale;
+      const height = road.size[1] * scale;
+      ctx.fillRect(x - width/2, y - height/2, width, height);
+    }
+
+    function drawCar(position, rotation) {
+      const carSize = 10;
+      ctx.save();
+      ctx.translate(position[0] * scale, position[1] * scale);
+      ctx.rotate(rotation);
+      ctx.beginPath();
+      ctx.fillStyle = 'red';
+      ctx.moveTo(0, -carSize);
+      ctx.lineTo(-carSize/2, carSize);
+      ctx.lineTo(carSize/2, carSize);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+
+    function drawStartEnd(start, end) {
+      ctx.beginPath();
+      ctx.fillStyle = 'green';
+      ctx.arc(start[0] * scale, start[1] * scale, 8, 0, Math.PI * 2);
+      ctx.fill();
+      
+      ctx.beginPath();
+      ctx.fillStyle = 'blue';
+      ctx.arc(end[0] * scale, end[1] * scale, 8, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    function clearCanvas() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
+
+    function drawFrame(index) {
+      if (index >= 0 && index < frames.length) {
+        clearCanvas();
+        eval(frames[index]);
+        updateFrameCounter();
+      }
+    }
+
+    function startAnimation() {
+      if (isPaused) {
+        isPaused = false;
+        requestAnimationFrame(animate);
+      }
+    }
+
+    function pauseAnimation() {
+      isPaused = true;
+    }
+
+    function resetAnimation() {
+      frameIndex = 0;
+      isPaused = true;
+      drawFrame(frameIndex);
+    }
+
+    function animate() {
+      if (!isPaused && frameIndex < frames.length) {
+        drawFrame(frameIndex);
+        frameIndex++;
+        setTimeout(() => requestAnimationFrame(animate), 50); // 20 fps
+      }
+    }
+
+    function updateFrameCounter() {
+      document.getElementById('frameCounter').textContent = 
+        `Frame: ${frameIndex + 1}/${frames.length}`;
+    }
+
+    // Animation frames will be injected here
+    const frames = [];
+
+    // Initialize visualization
+    window.simulationRenderer = {
+      drawRoad,
+      drawCar,
+      drawStartEnd,
+      clearCanvas
+    };
+
+    // Draw first frame
+    if (frames.length > 0) {
+      drawFrame(0);
+    }
+  </script>
+</body>
+</html>

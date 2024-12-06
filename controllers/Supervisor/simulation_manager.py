@@ -7,16 +7,23 @@ import os
 
 
 class SimulationManager:
-    def __init__(self, port: int = 1234):
-        self.port = port
-        self.simulation = Simulation()
-        self.fitness = 0.0
-        self.max_simulation_time = 15  # seconds
+    def __init__(self, process_id=0):
+        self.simulation = None
+        self.max_simulation_time = 1000  # Maximum frames for simulation
+        self.process_id = process_id
+        self.num_trials = 5
+        self.reset_simulation_state()
 
     def reset_simulation_state(self):
         """Reset the simulation to initial state."""
+        self.simulation = Simulation()
         self.simulation.reset()
-        self.fitness = 0.0
+
+    def calculate_distance_from_start(self):
+        """Calculate how far the car has traveled from start position."""
+        dx = self.simulation.car.position[0] - self.simulation.start.position[0]
+        dy = self.simulation.car.position[1] - self.simulation.start.position[1]
+        return np.sqrt(dx * dx + dy * dy)
 
     def calculate_distance_reward(self) -> float:
         """Calculate reward based on distance to goal."""
@@ -25,61 +32,99 @@ class SimulationManager:
         self.simulation.previous_distance = current_distance
         return reward
 
-    def evaluate_genome(self, genome: RecurrentNetwork) -> float:
-        """Evaluate a single genome's fitness."""
-        genome.hidden_state = None
-        self.simulation.time = 0.0
-        self.fitness = 0.0
-
-        # Calculate shortest path (manhattan distance)
-        dx = abs(self.simulation.end.position[0] - self.simulation.start.position[0])
-        dy = abs(self.simulation.end.position[1] - self.simulation.start.position[1])
-        shortest_path = dx + dy
-        self.max_simulation_time = max(12, shortest_path / 5.0)
+    def evaluate_single_trial(self, genome):
+        """Evaluate a single trial based on distance traveled from start."""
+        genome.hidden_state = None  # Reset RNN state
+        start_time = self.simulation.time
 
         while self.simulation.time < self.max_simulation_time:
-            if self.simulation.reached_goal():
-                return 100 / (self.simulation.time + 1e-8)
-
+            # Get inputs and run network
             inputs = self.simulation.get_inputs()
             outputs = genome.forward(inputs)
             self.simulation.set_controls(outputs)
 
+            # If simulation step fails (crash), end trial and return distance traveled
+            if not self.simulation.step():
+                return self.calculate_distance_from_start()
+
+        # If time runs out, return distance traveled
+        return self.calculate_distance_from_start()
+
+    def evaluate_genome(self, genome):
+        """Evaluate a genome over multiple trials and return median fitness."""
+        trial_fitnesses = []
+
+        for trial in range(self.num_trials):
+            self.reset_simulation_state()
+            trial_fitness = self.evaluate_single_trial(genome)
+            trial_fitnesses.append(trial_fitness)
+
+        return float(np.median(trial_fitnesses))
+
+    def visualize_network(self, genome: RecurrentNetwork, save_path: str = "visualization.html"):
+        # Load the HTML template
+        with open('simulation_template.html', 'r') as f:
+            html_template = f.read()
+
+        # Reset states
+        self.reset_simulation_state()
+        genome.hidden_state = None
+        frames = []
+        print("Starting simulation...")  # Debug print
+
+        while self.simulation.time < self.max_simulation_time:
+            # Record current frame
+            frame_commands = [
+                "simulationRenderer.clearCanvas();",
+            ]
+
+            # Draw all roads
+            for road in self.simulation.all_roads:
+                frame_commands.append(
+                    f"simulationRenderer.drawRoad({{"
+                    f"position: [{road.position[0]}, {road.position[1]}], "
+                    f"size: [{road.size[0]}, {road.size[1]}]"
+                    f"}});"
+                )
+
+            # Draw start and end points
+            frame_commands.append(
+                f"simulationRenderer.drawStartEnd("
+                f"[{self.simulation.start.position[0]}, {self.simulation.start.position[1]}], "
+                f"[{self.simulation.end.position[0]}, {self.simulation.end.position[1]}]);"
+            )
+
+            # Draw car
+            frame_commands.append(
+                f"simulationRenderer.drawCar("
+                f"[{self.simulation.car.position[0]}, {self.simulation.car.position[1]}], "
+                f"{self.simulation.car.rotation});"
+            )
+
+            frames.append("\n".join(frame_commands))
+
+            # Run simulation step
+            inputs = self.simulation.get_inputs()
+            outputs = genome.forward(inputs)
+            self.simulation.set_controls(outputs)
             if not self.simulation.step():  # Car went off road
-                return -1
+                print("Car went off road")  # Debug print
+                break
 
-            self.fitness += self.calculate_distance_reward()
+            if self.simulation.reached_goal():
+                print("Reached goal!")  # Debug print
+                break
 
-        return (100 - self.simulation.calculate_distance_to_goal()) / \
-            (self.max_simulation_time + 1e-8)
+        print(f"Generated {len(frames)} frames")  # Debug print
 
+        # Generate visualization HTML with actual frame data
+        js_frames = "[" + ",".join([f"`{frame}`" for frame in frames]) + "]"
+        viz_html = html_template.replace(
+            'const frames = [];',
+            f'const frames = {js_frames};'
+        )
 
-def loadall(dirname: str) -> list:
-    """Load all genome files from a directory."""
-    genome_list = []
-    for root, dirs, files in os.walk(dirname):
-        for genome in files:
-            genome_list.append(RecurrentNetwork.load(Path(root) / genome))
-    return genome_list
-
-
-def run_simulation():
-    """Main simulation loop."""
-    manager = SimulationManager()
-
-    # Get the genome data directory path
-    current_directory = os.path.dirname(__file__)
-    grandpa_directory = os.path.abspath(os.path.join(current_directory, "..", ".."))
-    genome_data_path = os.path.join(grandpa_directory, "genome_data", f"genome_data{manager.port}")
-
-    # Load and evaluate all genomes
-    batch = loadall(genome_data_path)
-    for genome in batch:
-        manager.reset_simulation_state()
-        fitness = manager.evaluate_genome(genome)
-        genome.fitness = fitness
-        print(genome.fitness)
-
-
-if __name__ == '__main__':
-    run_simulation()
+        # Save to file
+        with open(save_path, 'w') as f:
+            f.write(viz_html)
+        print(f"Saved visualization to {save_path}")  # Debug print

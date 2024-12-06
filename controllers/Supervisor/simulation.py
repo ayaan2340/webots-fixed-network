@@ -6,6 +6,9 @@ import numpy as np
 import torch
 
 
+EPS = 1e-10
+
+
 @dataclass
 class Road:
     position: Tuple[float, float]  # x, y position
@@ -118,22 +121,26 @@ class Simulation:
         self.start.position = start_pos
         self.end.position = end_pos
 
+    @staticmethod
+    def road_bounds(road):
+        rx, ry = road.position
+        rw, rh = road.size
+        half_width = rw / 2
+        half_height = rh / 2
+
+        # Check if point is within road boundaries with EPS tolerance
+        x_min = rx - half_width - EPS
+        x_max = rx + half_width + EPS
+        y_min = ry - half_height - EPS
+        y_max = ry + half_height + EPS
+        return x_min, x_max, y_min, y_max
+
     def is_on_road(self, position: Tuple[float, float]) -> bool:
         """Check if a position is on any road."""
         x, y = position
-        epsilon = 1e-10  # Small value for floating-point comparison
 
         for road in self.all_roads:
-            rx, ry = road.position
-            rw, rh = road.size
-            half_width = rw / 2
-            half_height = rh / 2
-
-            # Check if point is within road boundaries with epsilon tolerance
-            x_min = rx - half_width - epsilon
-            x_max = rx + half_width + epsilon
-            y_min = ry - half_height - epsilon
-            y_max = ry + half_height + epsilon
+            x_min, x_max, y_min, y_max = self.road_bounds(road)
 
             if x_min <= x <= x_max and y_min <= y <= y_max:
                 return True
@@ -160,6 +167,77 @@ class Simulation:
             angle -= 2 * np.pi  # Convert to [-π, π]
         return angle
 
+    def grid_intersects(self):
+        x1, y1 = self.car.position
+        angle = self.car.rotation
+
+        # Handle vertical lines (90° and 270°)
+        if abs(abs(angle % np.pi) - np.pi / 2) < EPS:
+            direction = 1 if abs(angle - np.pi / 2) < EPS else -1
+            for road in self.vertical_roads + self.horizontal_roads:
+                x_min, x_max, y_min, y_max = self.road_bounds(road)
+                # Only check horizontal bounds for vertical rays
+                yield (x1, y_min), road, not road.is_vertical
+                yield (x1, y_max), road, not road.is_vertical
+            return
+
+        # Handle horizontal lines (0° and 180°)
+        if abs(angle % np.pi) < EPS or abs(angle % np.pi - np.pi) < EPS:
+            direction = 1 if abs(angle) < EPS else -1
+            for road in self.vertical_roads + self.horizontal_roads:
+                x_min, x_max, y_min, y_max = self.road_bounds(road)
+                # Only check vertical bounds for horizontal rays
+                yield (x_min, y1), road, road.is_vertical
+                yield (x_max, y1), road, road.is_vertical
+            return
+
+        # For all other angles, use slope-intercept form
+        slope = np.tan(angle)
+        a = slope
+        b = -1
+        c = y1 - (slope * x1)
+
+        for road in self.vertical_roads + self.horizontal_roads:
+            x_min, x_max, y_min, y_max = self.road_bounds(road)
+            short_edge = not road.is_vertical
+
+            left_intersect = (x_min, (-a * x_min - c) / b)
+            yield left_intersect, road, short_edge
+            right_intersect = (x_max, (-a * x_max - c) / b)
+            yield right_intersect, road, short_edge
+            bot_intersect = ((-b * y_min - c) / a, y_min)
+            yield bot_intersect, road, not short_edge
+            top_intersect = ((-b * y_max - c) / a, y_max)
+            yield top_intersect, road, not short_edge
+
+    def in_road(self, coord, orig_road, is_edge):
+        if is_edge:
+            return False  # Always allow these
+        if orig_road.is_vertical:
+            for road in self.horizontal_roads:
+                _, _, y_min, y_max = self.road_bounds(road)
+                if y_min <= coord[1] <= y_max:
+                    return True
+            return False
+        for road in self.vertical_roads:
+            x_min, x_max, _, _ = self.road_bounds(road)
+            if x_min <= coord[0] <= x_max:
+                return True
+        return False
+
+    def calculate_ray_distance(self) -> float:
+        valid_coords = [c for c, r, s in self.grid_intersects()
+                        if not self.in_road(c, r, s)]
+
+        if not valid_coords:
+            return 150
+
+        points = np.array(valid_coords)
+        car_pos = np.array(self.car.position)
+        distances = np.sqrt(np.sum((points - car_pos) ** 2, axis=1))
+
+        return np.min(distances)
+
     def get_inputs(self) -> np.ndarray:
         """Get normalized inputs for the neural network."""
         return np.array([
@@ -167,7 +245,8 @@ class Simulation:
             (self.car.position[0] - self.end.position[0]) / 150,
             (self.car.position[1] - self.end.position[1]) / 150,
             self.speed / self.max_speed,
-            self.steering_angle / self.max_steering_angle
+            self.steering_angle / self.max_steering_angle,
+            self.calculate_ray_distance() / 150  # Normalize by max expected distance
         ])
 
     def set_controls(self, outputs):
@@ -176,7 +255,16 @@ class Simulation:
         if isinstance(outputs, torch.Tensor):
             outputs = outputs.detach().numpy()
 
-        self.speed = float(outputs[0] * self.max_speed)
+        # Set minimum speed to 20% of max speed
+        min_speed = self.max_speed * 0.01  # 6.0 units/sec if max_speed is 30
+        raw_speed = float(outputs[0] * self.max_speed)
+
+        # Enforce minimum speed while keeping direction (positive/negative)
+        if abs(raw_speed) < min_speed:
+            self.speed = min_speed if raw_speed >= 0 else -min_speed
+        else:
+            self.speed = raw_speed
+
         self.steering_angle = float(outputs[1] * self.max_steering_angle)
 
     def step(self):

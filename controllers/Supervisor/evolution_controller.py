@@ -169,8 +169,8 @@ class PopulationManager:
 def main():
     # Initialize and run evolution
     population_manager = PopulationManager(
-        population_size=100,
-        input_size=5,
+        population_size=256,
+        input_size=6,
         hidden_size=10,
         output_size=2,
         num_workers=8  # Adjust based on your CPU cores
