@@ -34,26 +34,27 @@ class PopulationManager:
     def run_webots_static(port):
         current_directory = os.path.dirname(__file__)  # Directory of the current script
 
-        # Construct the path to the Webots world file dynamically by going up one
-        # directory and then into "worlds"
-        world_file_path = os.path.join(
-            current_directory,
-            "..",  # Move up to the parent directory
-            "..",
-            r"C:\Program Files\Webots\msys64\mingw64\bin\webotsw.exe",
-            r"C:\Users\tonya\Downloads\webots-fixed-network\worlds\firstWorld.wbt"
-        )
-        world_file_path = os.path.abspath(world_file_path)  # Ensure the path is absolute
+        # Webots executable path
+        webots_exe = r"C:\Program Files\Webots\msys64\mingw64\bin\webotsw.exe"
 
-        # Run Webots with the dynamically constructed path
+        # World file path - direct path since you have it
+        world_file_path = r"C:\Users\tonya\Downloads\webots-fixed-network\worlds\firstWorld.wbt"
+
+        # Check if files exist
+        if not os.path.exists(webots_exe):
+            raise FileNotFoundError(f"Webots executable not found at: {webots_exe}")
+        if not os.path.exists(world_file_path):
+            raise FileNotFoundError(f"World file not found at: {world_file_path}")
+
+        # Run Webots with the correct paths
         subprocess.run([
-            "webots",
+            webots_exe,  # Use the executable path
             f"--port={port}",
             "--mode=fast",
             "--no-rendering",
             "--batch",
             "--minimize",
-            world_file_path  # Use the dynamically constructed path
+            world_file_path
         ], check=False)
 
     def start_webots_instances(self):
@@ -112,9 +113,9 @@ class PopulationManager:
                 f"--port={port}",
                 r"C:\Users\tonya\Downloads\webots-fixed-network\controllers\Supervisor\SimulationManager.py",
                 "--port", str(port)
-            ], 
-                capture_output=True, 
-                text=True, 
+            ],
+                capture_output=True,
+                text=True,
                 check=True,
             )
         except subprocess.CalledProcessError as e:
@@ -125,8 +126,9 @@ class PopulationManager:
                 f.write(f"Process failed with exit code {e.returncode}\n")
                 f.write(f"Error output:\n{error_output}")
 
-            ## Raise a new exception with the detailed error info
-            raise RuntimeError(f"Subprocess failed with exit code {e.returncode}. Error: {error_output}") from e
+            # Raise a new exception with the detailed error info
+            raise RuntimeError(
+                f"Subprocess failed with exit code {e.returncode}. Error: {error_output}") from e
         # Parse fitness scores from output
         fitness_values = list(map(float, result.stdout.splitlines()))
 
