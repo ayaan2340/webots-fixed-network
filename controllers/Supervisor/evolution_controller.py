@@ -1,10 +1,9 @@
-import numpy as np
 import multiprocessing
-import os
 from pathlib import Path
-import torch
 from typing import List, Dict
+import time
 
+import numpy as np
 from RecurrentNetwork import RecurrentNetwork
 from simulation_manager import SimulationManager
 from syllabus import SyllabusGenerator, evaluate_batch_with_frames
@@ -213,21 +212,34 @@ class PopulationManager:
     def train(self, num_generations: int):
         """Train the population over multiple generations."""
         try:
+            total_time = 0
             for self.generation in range(num_generations):
+                generation_start = time.time()
                 print(f"\nGeneration {self.generation}")
 
                 # Evaluate fitness
                 best_fitness = self.evaluate_fitness()
                 avg_fitness = np.mean(self.fitness_scores)
 
-                print(f"Best Fitness: {best_fitness:.2f}")
-                print(f"Average Fitness: {avg_fitness:.2f}")
-
                 # Create next generation
                 self.create_next_generation()
 
+                # Calculate and display timing
+                generation_time = time.time() - generation_start
+                total_time += generation_time
+                avg_time_per_gen = total_time / (self.generation + 1)
+
+                print(f"Best Fitness: {best_fitness:.2f}")
+                print(f"Average Fitness: {avg_fitness:.2f}")
+                print(f"Generation Time: {generation_time:.2f} seconds")
+                print(f"Average Time per Generation: {avg_time_per_gen:.2f} seconds")
+                print(f"Total Time: {total_time:.2f} seconds")
+
         except KeyboardInterrupt:
             print("\nTraining interrupted by user")
+            if self.generation > 0:
+                print(
+                    f"Final Average Time per Generation: {total_time/self.generation:.2f} seconds")
 
         finally:
             # Save final population
