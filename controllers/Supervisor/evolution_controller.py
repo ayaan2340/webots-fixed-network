@@ -109,7 +109,7 @@ class PopulationManager:
 
     def tournament_selection(self, tournament_size: int = 5) -> RecurrentNetwork:
         """Select the best individual from a random tournament."""
-        indices = np.random.choice(len(self.population), tournament_size, replace=False)
+        indices = np.random.choice(len(self.population), tournament_size, replace=True)
         tournament_fitness = [self.fitness_scores[i] for i in indices]
         winner_index = indices[np.argmax(tournament_fitness)]
         return self.population[winner_index]
@@ -169,11 +169,11 @@ class PopulationManager:
 def main():
     # Initialize and run evolution
     population_manager = PopulationManager(
-        population_size=256,
+        population_size=112 * 2,
         input_size=6,
         hidden_size=10,
         output_size=2,
-        num_workers=8  # Adjust based on your CPU cores
+        num_workers=112  # Adjust based on your CPU cores
     )
 
     population_manager.train(num_generations=300)

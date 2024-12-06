@@ -11,12 +11,13 @@ class SimulationManager:
         self.simulation = None
         self.max_simulation_time = 1000  # Maximum frames for simulation
         self.process_id = process_id
-        self.num_trials = 5
+        self.num_trials = 3
         self.reset_simulation_state()
 
     def reset_simulation_state(self):
         """Reset the simulation to initial state."""
         self.simulation = Simulation()
+        self.simulation.create_checkpoints()
         self.simulation.reset()
 
     def calculate_distance_from_start(self):

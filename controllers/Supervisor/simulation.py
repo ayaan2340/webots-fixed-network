@@ -4,6 +4,7 @@ from typing import List, Tuple
 import random
 import numpy as np
 import torch
+import logging
 
 
 EPS = 1e-10
@@ -69,9 +70,15 @@ class Simulation:
         self.distance_travelled = 0.0
         self.previous_distance = 0.0
 
+        # Initialize Checkpoints
+        self.create_checkpoints()
+        self.checkpoint_reached = False
+        self.current_checkpoint_index = 0
+
     def reset(self):
         """Reset the simulation state."""
         self.randomize_goals()
+        self.create_checkpoints()
         self.time = 0.0
         self.speed = 0.0
         self.steering_angle = 0.0
@@ -157,9 +164,14 @@ class Simulation:
         )
 
     def get_angle_to_goal(self) -> float:
+
+        if not self.checkpoint_reached:
+            goal_position = self.checkpoints[self.current_checkpoint_index]
+        else:
+            goal_position = self.end.position
         """Calculate angle between car's heading and goal."""
-        dx = self.end.position[0] - self.car.position[0]
-        dy = self.end.position[1] - self.car.position[1]
+        dx = goal_position[0] - self.car.position[0]
+        dy = goal_position[1] - self.car.position[1]
         goal_angle = np.arctan2(dy, dx)
         return self.normalize_angle(goal_angle - self.car.rotation)
 
@@ -298,3 +310,36 @@ class Simulation:
         """Check if car has reached the goal."""
         distance = self.calculate_distance_to_goal()
         return distance < 2.0  # 2 units tolerance
+
+    def create_checkpoints(self):
+        """
+        Create multiple checkpoints along the route.
+        Ensure that checkpoints are placed at intersections along the optimal path.
+        """
+        # Possible intersection positions as checkpoints
+        intersection_positions = [(30, 30), (60, 60), (90, 90), (120, 120)]
+
+        # Make sure the start and end positions are distinct and not overlapping
+        if not self.start.position or not self.end.position:
+            raise ValueError("Start and end positions must be defined before creating checkpoints.")
+
+        # Sort intersections by distance from the start to create an ordered route
+        sorted_intersections = sorted(
+            intersection_positions,
+            key=lambda pos: np.linalg.norm(
+                np.array(pos) -
+                np.array(
+                    self.start.position)))
+
+        # Select checkpoints that lie between the start and end positions
+        checkpoints = []
+        for intersection in sorted_intersections:
+            if (
+                np.linalg.norm(np.array(intersection) - np.array(self.start.position)) > 2.0 and
+                np.linalg.norm(np.array(intersection) - np.array(self.end.position)) > 2.0
+            ):
+                checkpoints.append(intersection)
+
+        # Set checkpoints for the simulation (excluding start and end positions)
+        self.checkpoints = checkpoints
+        logging.info(f"Checkpoints created: {self.checkpoints}")
