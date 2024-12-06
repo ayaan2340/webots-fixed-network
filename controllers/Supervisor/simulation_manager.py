@@ -63,9 +63,6 @@ class SimulationManager:
     def evaluate_single_trial(self, genome, frame_buffer) -> float:
         """Evaluate a single trial based on total distance traveled, with soft resets."""
         genome.hidden_state = None  # Reset RNN state
-        start_time = self.simulation.time
-        total_distance = 0.0
-        last_position = self.simulation.car.position
 
         while self.simulation.time < self.max_simulation_time:
             # Get inputs and run network
@@ -80,21 +77,10 @@ class SimulationManager:
 
             # If car goes off road, perform soft reset
             if not self.simulation.step():
-                total_distance = 0  # Reset distance as penalty
-
-                # Soft reset - only move car back to start
                 self.simulation.car.position = self.simulation.start.position
-                last_position = self.simulation.start.position
                 continue
 
-            dx = self.simulation.car.position[0] - last_position[0]
-            dy = self.simulation.car.position[1] - last_position[1]
-            total_distance += np.sqrt(dx * dx + dy * dy)
-
-            # Update last position for next distance calculation
-            last_position = self.simulation.car.position
-
-        return total_distance
+        return self.calculate_distance_from_start()
 
     def evaluate_genome(self, genome, frame_buffer=None) -> float:
         """Evaluate a genome over multiple trials."""
