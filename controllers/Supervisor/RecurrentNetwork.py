@@ -125,5 +125,32 @@ class RecurrentNetwork(nn.Module):
         torch.save(self, path)
 
     @staticmethod
-    def load(path):
-        return torch.load(path)
+    def load(path, **kwargs):
+        """
+        Load a network from a saved file.
+
+        Args:
+            path: Path to the saved network file
+
+        Returns:
+            RecurrentNetwork: Loaded network with weights restored
+        """
+        saved_data = torch.load(path)
+
+        # Handle case where saved data is a dictionary with genome params
+        if isinstance(saved_data, dict) and 'genome' in saved_data:
+            # Create a new network with default parameters
+            # Note: This assumes we know the architecture. You might need to
+            # store/load these parameters separately if they vary
+            network = RecurrentNetwork(**kwargs)
+
+            # Load the state dict from the saved genome parameters
+            network.load_state_dict(saved_data['genome'])
+
+            # Store the fitness score as an attribute
+            network.fitness_score = saved_data['fitness']
+
+            return network
+
+        # Handle case where saved data is the network itself (old format)
+        return saved_data
