@@ -9,54 +9,67 @@ from pathlib import Path
 
 from RecurrentNetwork import RecurrentNetwork
 
+
 class PopulationManager:
-    def __init__(self, population_size, input_size, hidden_size, output_size):
+    def __init__(self, population_size, input_size, hidden_size, output_size, port,
+                 jobs=10):
         self.population_size = population_size
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.output_size = output_size
-        
+        self.base_port = port
+
         # Initialize population
         self.population = [
-            RecurrentNetwork(input_size, hidden_size, output_size, genome_id) 
+            RecurrentNetwork(input_size, hidden_size, output_size, genome_id)
             for genome_id in range(population_size)
         ]
-        
-        # Initialize fitness scores
-        self.fitness_scores = [0.0] * population_size
-        
-        # Configure parallel processing
-        self.processor_count = 10
-        self.ports = [10000 + i for i in range(self.processor_count)]
-        self.generation = 0
-        self.webots_processes = []
 
-    def run_webots(self, port):
-        """
-        Run a single Webots instance on a specific port
-        """
-        try:
-            # CHANGE FIRST LINE OF SUBPROCESS RUN TO YOUR WEBOTS-CONTROLLER FILE
-            subprocess.run([
-                "/Applications/Webots.app/Contents/MacOS/webots-controller", 
-                f"--port={port}", 
-                "SimulationManager.py",
-                "--port", str(port)
-            ], check=True)
-        except subprocess.CalledProcessError as e:
-            print(f"Error in Webots process on port {port}: {e}")
+        self.fitness_scores = [0.0] * population_size
+        self.processor_count = jobs
+        self.ports = [self.base_port + i for i in range(self.processor_count)]
+        self.generation = 0
+
+    @staticmethod
+    def run_webots_static(port):
+        current_directory = os.path.dirname(__file__)  # Directory of the current script
+
+        # Construct the path to the Webots world file dynamically by going up one
+        # directory and then into "worlds"
+        world_file_path = os.path.join(
+            current_directory,
+            "..",  # Move up to the parent directory
+            "..",
+            "worlds",
+            "firstWorld.wbt"
+        )
+        world_file_path = os.path.abspath(world_file_path)  # Ensure the path is absolute
+
+        # Run Webots with the dynamically constructed path
+        subprocess.run([
+            "webots",
+            f"--port={port}",
+            "--mode=fast",
+            "--no-rendering",
+            "--batch",
+            "--minimize",
+            world_file_path  # Use the dynamically constructed path
+        ], check=False)
 
     def start_webots_instances(self):
-        """
-        Start multiple Webots instances in parallel
-        """
-        self.webots_processes = []
+        """Start multiple Webots instances in parallel using static method"""
+        processes = []
         for port in self.ports:
-            process = multiprocessing.Process(target=self.run_webots, args=(port,))
-            self.webots_processes.append(process)
+            # Use static method instead of instance method
+            process = multiprocessing.Process(
+                target=PopulationManager.run_webots_static,
+                args=(port,)
+            )
+            processes.append(process)
             process.start()
-        
-        # Give Webots some time to initialize
+
+        # Store processes without storing the whole class instance
+        self._processes = processes
         time.sleep(15)
 
     def distribute_genomes_evenly(self, genomes):
@@ -68,7 +81,7 @@ class PopulationManager:
         extra_size = batch_size + 1  # Number of genomes for batches with one extra genome
         extra_batches = total_genomes % self.processor_count
         batches = []
-        
+
         genome_index = 0
         # Distribute batches with the extra genome
         for _ in range(extra_batches):
@@ -83,94 +96,90 @@ class PopulationManager:
             genome_index += batch_size
 
         return batches
-    
+
     def save_batch(self, batch, port):
         # Prepare genome data for simulation
         dir_path = Path(f"genome_data/genome_data{port}")
         for genome_id, genome in enumerate(batch):
             genome.save(dir_path / f"{genome_id}.h5")
 
-    def run_simulation(self, port, batch, ready_event, fitness_scores):
-        """
-        Run simulation for a batch of genomes on a specific port
-        """
-        self.save_batch(batch, port)
-        
-        # Run Webots controller
-        current_dir = os.path.dirname(__file__)
-        file_path = os.path.join(current_dir, "SimulationManager.py")
-        
-        result = subprocess.run([
-            "/Applications/Webots.app/Contents/MacOS/webots-controller", 
-            f"--port={port}", 
-            file_path,
-            "--port", str(port)
-        ], capture_output=True, text=True)
-        
-        if result.returncode != 0:
-            print(f"Error occurred while running Webots controller on port {port}:")
-            print(result.stderr)
-        else:
-            print(f"Webots controller on port {port} ran successfully.")
-        
-        # Parse fitness scores
-        fitness_values = list(map(float, result.stdout.splitlines()))
-        for i, genome in enumerate(batch):
-            fitness_scores[genome] = fitness_values[i]
+    @staticmethod
+    def run_simulation_static(port, ready_event, fitness_dict):
+        """Static method to run simulation without class instance"""
+        try:
+            result = subprocess.run([
+                "/Applications/Webots.app/Contents/MacOS/webots-controller",
+                f"--port={port}",
+                "SimulationManager.py",
+                "--port", str(port)
+            ], capture_output=True, text=True, check=True)
 
-        ready_event.set()
+            # Parse fitness scores from output
+            fitness_values = list(map(float, result.stdout.splitlines()))
+
+            # Read genomes and update fitness dictionary
+            genome_dir = Path(f"genome_data/genome_data{port}")
+            for i, genome_path in enumerate(sorted(genome_dir.glob("*.h5"))):
+                genome = RecurrentNetwork.load(genome_path)
+                fitness_dict[genome.genome_id] = fitness_values[i]
+        except Exception as e:
+            print(f"Error in simulation process on port {port}: {e}")
+        finally:
+            ready_event.set()
 
     def evaluate_fitness(self):
-        """
-        Parallel fitness evaluation using multiprocessing
-        """
-        # Prepare genomes with their IDs
-        genomes_with_ids = [(i, genome) for i, genome in enumerate(self.population)]
-        
-        # Distribute genomes across processors
-        batches = self.distribute_genomes_evenly(genomes_with_ids)
+        """Parallel fitness evaluation"""
+        # Save genomes to temporary files before distributing
+        batches = self.distribute_genomes_evenly(self.population)
+        for i, batch in enumerate(batches):
+            save_dir = Path(f"genome_data/genome_data{self.ports[i]}")
+            save_dir.mkdir(parents=True, exist_ok=True)
+            for j, genome in enumerate(batch):
+                genome.save(save_dir / f"{j}.h5")
 
-        # Run simulations in parallel
+        # Run simulations in parallel using static method
         processes = []
         ready_events = []
         manager = multiprocessing.Manager()
-        fitness_scores = manager.dict()
-        
-        for i in range(self.processor_count):
+        fitness_dict = manager.dict()
+
+        for i, port in enumerate(self.ports):
             ready_event = multiprocessing.Event()
-            ready_events.append(ready_event)
             process = multiprocessing.Process(
-                target=self.run_simulation, 
-                args=(self.ports[i], batches[i], ready_event, fitness_scores)
+                target=self.run_simulation_static,
+                args=(port, ready_event, fitness_dict)
             )
             processes.append(process)
+            ready_events.append(ready_event)
             process.start()
-        
-        # Wait for all processes to signal readiness
-        for ready_event in ready_events:
-            ready_event.wait()
 
-        print("All simulations have completed.")
-        
-        # Wait for all processes to complete
+        # Wait for all processes
+        for event in ready_events:
+            event.wait()
+
         for process in processes:
             process.join()
-        
-        # Update fitness scores and find best genome
-        highestScore = 0
-        genomeHighest = None
-        for i, genome in enumerate(genomes_with_ids):
-            fitness = fitness_scores[genome]
-            self.fitness_scores[i] = fitness
-            if fitness > highestScore:
-                highestScore = fitness
-                genomeHighest = genome
-        
+
+        # Update fitness scores
+        highest_score = 0
+        best_genome = None
+        for i, genome in enumerate(self.population):
+            if genome.genome_id in fitness_dict:
+                self.fitness_scores[i] = fitness_dict[genome.genome_id]
+                if self.fitness_scores[i] > highest_score:
+                    highest_score = self.fitness_scores[i]
+                    best_genome = genome
+
         # Save best genome
-        with open(f"bestBest/lebron{self.generation}.pkl", "wb") as f:
-            pickle.dump((highestScore, genomeHighest), f)
-        
-        return highestScore
+        if best_genome is not None:
+            save_dir = Path("bestBest")
+            save_dir.mkdir(exist_ok=True)
+            torch.save({
+                'fitness': highest_score,
+                'genome': best_genome.state_dict()
+            }, save_dir / f"lebron{self.generation}.pt")
+
+        return highest_score
 
     def tournament_selection(self, tournament_size=5):
         """
@@ -226,21 +235,23 @@ class PopulationManager:
 
         finally:
             # Terminate all Webots processes
-            for process in self.webots_processes:
+            for process in self._processes:
                 os.kill(process.pid, signal.SIGTERM)
-            
             # Wait for processes to terminate
-            for process in self.webots_processes:
+            for process in self._processes:
                 process.join()
+
 
 def main():
     population_manager = PopulationManager(
-        population_size=100, 
-        input_size=5, 
-        hidden_size=10, 
-        output_size=2
+        population_size=100,
+        input_size=5,
+        hidden_size=10,
+        output_size=2,
+        port=10000
     )
     population_manager.train(num_generations=300)
+
 
 if __name__ == '__main__':
     main()
