@@ -40,8 +40,8 @@ class PopulationManager:
             current_directory,
             "..",  # Move up to the parent directory
             "..",
-            "worlds",
-            "firstWorld.wbt"
+            r"C:\Program Files\Webots\msys64\mingw64\bin\webotsw.exe",
+            r"C:\Users\tonya\Downloads\webots-fixed-network\worlds\firstWorld.wbt"
         )
         world_file_path = os.path.abspath(world_file_path)  # Ensure the path is absolute
 
@@ -108,9 +108,9 @@ class PopulationManager:
         """Static method to run simulation without class instance"""
         try:
             result = subprocess.run([
-                "/Applications/Webots.app/Contents/MacOS/webots-controller",
+                r"C:\Program Files\Webots\msys64\mingw64\bin\webots-controller.exe",
                 f"--port={port}",
-                "SimulationManager.py",
+                r"C:\Users\tonya\Downloads\webots-fixed-network\controllers\Supervisor\SimulationManager.py",
                 "--port", str(port)
             ], 
                 capture_output=True, 
