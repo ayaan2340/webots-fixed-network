@@ -146,6 +146,9 @@ class Simulation:
                 return True
         return False
 
+    def am_on_road(self):
+        return self.is_on_road(self.car.position)
+
     def calculate_distance_to_goal(self) -> float:
         """Calculate distance from car to goal."""
         return np.sqrt(
@@ -283,16 +286,13 @@ class Simulation:
         )
 
         # Only update if new position is valid
-        if self.is_on_road(new_position):
-            self.car.position = new_position
-            self.car.rotation = self.normalize_angle(
-                rotation + speed * np.tan(angle) * self.time_step)
-            self.distance_travelled += np.sqrt(dx**2 + dy**2)
-        else:
-            return False  # End simulation if car goes off road
+        self.car.position = new_position
+        self.car.rotation = self.normalize_angle(
+            rotation + speed * np.tan(angle) * self.time_step)
+        self.distance_travelled += np.sqrt(dx**2 + dy**2)
 
         self.time += self.time_step
-        return True
+        return not self.reached_goal()
 
     def reached_goal(self) -> bool:
         """Check if car has reached the goal."""

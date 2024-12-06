@@ -36,8 +36,14 @@ class SimulationManager:
         """Evaluate a single trial based on distance traveled from start."""
         genome.hidden_state = None  # Reset RNN state
         start_time = self.simulation.time
+        prev_time = 0
+        time_on_road = 0
 
         while self.simulation.time < self.max_simulation_time:
+            if self.simulation.am_on_road():
+                time_on_road += self.simulation.time - prev_time
+            prev_time = self.simulation.time
+
             # Get inputs and run network
             inputs = self.simulation.get_inputs()
             outputs = genome.forward(inputs)
@@ -45,10 +51,11 @@ class SimulationManager:
 
             # If simulation step fails (crash), end trial and return distance traveled
             if not self.simulation.step():
-                return self.calculate_distance_from_start()
+                break
 
         # If time runs out, return distance traveled
-        return self.calculate_distance_from_start()
+        on_road = time_on_road / self.simulation.time
+        return self.calculate_distance_from_start() * on_road
 
     def evaluate_genome(self, genome):
         """Evaluate a genome over multiple trials and return median fitness."""
@@ -59,7 +66,7 @@ class SimulationManager:
             trial_fitness = self.evaluate_single_trial(genome)
             trial_fitnesses.append(trial_fitness)
 
-        return float(np.median(trial_fitnesses))
+        return float(np.mean(trial_fitnesses))
 
     def visualize_network(self, genome: RecurrentNetwork, save_path: str = "visualization.html"):
         # Load the HTML template
