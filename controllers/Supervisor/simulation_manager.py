@@ -21,7 +21,7 @@ class SimulationManager:
         self.simulation = None
         self.max_simulation_time = 1000  # Maximum frames for simulation
         self.process_id = process_id
-        self.num_trials = 5
+        self.num_trials = 1
         self.syllabus_manager = syllabus_manager
         self.frame_sample_rate = 10
         self.reset_simulation_state()
