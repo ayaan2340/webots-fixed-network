@@ -12,7 +12,7 @@ from syllabus import SyllabusGenerator, evaluate_batch_with_frames
 
 class PopulationManager:
     def __init__(self, population_size: int, input_size: int,
-                 hidden_size: int, output_size: int, num_workers: int = 10):
+                 hidden_size: int, output_size: int, num_workers: int = 8):
         self.population_size = population_size
         self.input_size = input_size
         self.hidden_size = hidden_size
@@ -83,9 +83,9 @@ class PopulationManager:
 
         # Collect frames while waiting for processes
         collected_frames = {}
-        completed_processes = 0
+        active_processes = list(range(len(processes)))  # Track indices of active processes
 
-        while completed_processes < len(processes):
+        while active_processes:
             # Check for new frames
             try:
                 while True:
@@ -97,13 +97,12 @@ class PopulationManager:
                 pass
 
             # Check for completed processes
-            for i, event in enumerate(ready_events):
-                if event.is_set():
-                    processes[i].join()
-                    ready_events[i] = None
-                    completed_processes += 1
+            for process_idx in active_processes[:]:  # Create a copy for safe iteration
+                if ready_events[process_idx].is_set():
+                    processes[process_idx].join()
+                    active_processes.remove(process_idx)
 
-        # Update fitness scores and return best fitness
+        # Update fitness scores and generate syllabus
         for i, genome in enumerate(self.population):
             self.fitness_scores[i] = fitness_dict.get(genome.genome_id, 0.0)
 
@@ -241,7 +240,7 @@ class PopulationManager:
 def main():
     # Initialize and run evolution
     population_manager = PopulationManager(
-        population_size=256,
+        population_size=100,
         input_size=6,
         hidden_size=10,
         output_size=2,
