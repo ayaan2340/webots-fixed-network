@@ -61,18 +61,13 @@ class SimulationManager:
         return reward
 
     def evaluate_single_trial(self, genome, frame_buffer) -> float:
-        """Evaluate a single trial and record frames."""
-        genome.hidden_state = None
+        """Evaluate a single trial based on total distance traveled, with soft resets."""
+        genome.hidden_state = None  # Reset RNN state
         start_time = self.simulation.time
-        prev_time = 0
-        time_on_road = 0
-        success = False
+        total_distance = 0.0
+        last_position = self.simulation.car.position
 
         while self.simulation.time < self.max_simulation_time:
-            if self.simulation.am_on_road():
-                time_on_road += self.simulation.time - prev_time
-            prev_time = self.simulation.time
-
             # Get inputs and run network
             inputs = self.simulation.get_inputs()
             outputs = genome.forward(inputs)
@@ -82,25 +77,24 @@ class SimulationManager:
                 self.record_frame(genome, inputs, outputs, frame_buffer)
 
             self.simulation.set_controls(outputs)
+
+            # If car goes off road, perform soft reset
             if not self.simulation.step():
-                break
+                total_distance = 0  # Reset distance as penalty
 
-            if self.simulation.reached_goal():
-                success = True
-                break
+                # Soft reset - only move car back to start
+                self.simulation.car.position = self.simulation.start.position
+                last_position = self.simulation.start.position
+                continue
 
-        # Calculate fitness
-        on_road_ratio = time_on_road / (self.simulation.time - start_time)
-        distance_fitness = self.calculate_distance_from_start()
-        trial_fitness = distance_fitness * on_road_ratio
+            dx = self.simulation.car.position[0] - last_position[0]
+            dy = self.simulation.car.position[1] - last_position[1]
+            total_distance += np.sqrt(dx * dx + dy * dy)
 
-        # Update success status and fitness for all recorded frames
-        if frame_buffer is not None:
-            for frame in frame_buffer.frames.get(genome.genome_id, []):
-                frame.success = success
-                frame.fitness = trial_fitness
+            # Update last position for next distance calculation
+            last_position = self.simulation.car.position
 
-        return trial_fitness
+        return total_distance
 
     def evaluate_genome(self, genome, frame_buffer=None) -> float:
         """Evaluate a genome over multiple trials."""
