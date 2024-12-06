@@ -1,15 +1,42 @@
-import neat
+'''
+
+Key Changes and Notes:
+1. Replaced NEAT's genome with a PyTorch Recurrent Neural Network
+2. Maintained similar input/output structure
+3. Implemented tournament selection and custom mutation
+4. Added recurrent connections via hidden state
+5. Modified fitness calculation to work with PyTorch networks
+6. Kept the overall project structure and simulation workflow intact
+
+Recommendations for Implementation:
+1. Ensure you have the required libraries: `torch`, `numpy`
+2. Make sure the Webots simulation interface remains consistent
+3. The PyTorch implementation allows for more flexible network architectures
+
+Would you like me to elaborate on any part of the implementation or explain the design choices?
+
+'''
+
 from controller import Supervisor
-import numpy as np
 import cv2
 import random
 import pickle
 import os
+import argparse
 import random
+from pathlib import Path
+from RecurrentNetwork import RecurrentNetwork
 
-class NEATTester(Supervisor):
+class SimulationManager(Supervisor):
     def __init__(self):
         super().__init__()
+        parser = argparse.ArgumentParser(description="Parse the Webots controller port argument.")
+        parser.add_argument('--port', type=int, required=True, help='Port number for the Webots controller.')
+        args = parser.parse_args()
+        if args.port:
+            self.port = args.port
+        else:
+            self.port = 1234
         self.time_step = int(self.getBasicTimeStep())
 
         # Initialize the robot node first
@@ -146,6 +173,17 @@ class NEATTester(Supervisor):
         if obj:
             obj.getField("translation").setSFVec3f(position)
 
+    def randomize_goals(self):
+        # Teleport redEnd and greenStart at the start of each generation
+        new_red_end_position = self.get_random_road_position()
+        new_green_start_position = self.get_random_road_position()
+        while new_red_end_position == new_green_start_position:
+            new_red_end_position = self.get_random_road_position()
+            new_green_start_position = self.get_random_road_position()
+
+        self.teleport_object(self.end_obj, new_red_end_position)
+        self.teleport_object(self.green_start, new_green_start_position)
+        
     def reset_simulation_state(self):
         """Manually reset the simulation state."""
         # Reset velocities
@@ -177,23 +215,6 @@ class NEATTester(Supervisor):
     def getPos(self):
         """Get the current position of the car."""
         return self.robot_node.getPosition()
-
-    def detect_crash(self):
-        current_position = self.getPos()
-        if current_position is None:
-            return True
-
-        movement = [abs(current_position[i] - self.previous_position[i]) for i in range(3)]
-        self.previous_position = current_position
-
-        if all(m < self.movement_threshold for m in movement):
-            self.time_stuck += self.time_step / 1000.0
-            if self.time_stuck > self.crash_delay:
-                return True
-        else:
-            self.time_stuck = 0.0
-
-        return False
 
     def calculate_distance(self):
         """
@@ -239,42 +260,30 @@ class NEATTester(Supervisor):
     def calculate_angle(self):
         if self.angle_to_end <= -0.7 and self.angle_to_end >= 0.7:
             return -abs(self.angle_to_end)
+        else:
+            return 0
 
 
-    def evaluate_genome(self, model):
+    def evaluate_genome(self, genome: RecurrentNetwork):
         """Evaluate a single genome's fitness."""
-        # UNCOMMENT FOR FEED FORWARD NETWORK
-        # self.net = neat.nn.FeedForwardNetwork.create(genome, config)
-        # UNCOMMENT FOR RECURRENT NETWORK
-        self.net = model
+        genome.hidden_state = None
         self.start_time = self.getTime()
         self.fitness = 0.0
-        reached = False
-        timeCounter = 0.0
-        onRoadCounter = 0.0
-        rightDirection = 0.0
         self.max_simulation_time = max(12, (self.shortest_path / 5.0))
         while self.step(self.time_step) != -1:
             current_time = self.getTime()
-            if self.is_on_road():
-                onRoadCounter += 1
-            timeCounter += 1
             if current_time - self.start_time > self.max_simulation_time:
                 break
             if self.reached_end():
-                reached = True
-                break
+                self.fitness = 100 / (self.getTime() - self.start_time)
+                return self.fitness
+            # if not self.is_on_road():
+            #     return -1
             inputs = self.preprocess_inputs()
-            outputs = self.net.activate(inputs)
+            outputs = genome.forward(inputs)
             self.set_controls(outputs)
-            rightDirection += self.calculate_distance()
-            # Update fitness continuously
-        if reached:
-            # self.fitness = 50 + 20 * min(1.0, ((self.getTime() - self.start_time) / (self.shortest_path / 30.0))) - 30 * ((timeCounter - onRoadCounter) / timeCounter)
-            self.fitness += 5
-        
-        self.fitness = -10 * ((timeCounter - onRoadCounter) / timeCounter) + 30 * rightDirection / self.shortest_path
-        return self.fitness
+
+        return (100 - self.calculate_distance()) / self.max_simulation_time
         
     def shortestPath(self, carPos, endPos):
         if carPos[0] == endPos[0]:
@@ -317,46 +326,30 @@ class NEATTester(Supervisor):
                     return True
         return False
 
-def eval_genomes(model, config):
-    print("Starting a new generation...")
+def loadall(dirname):
+    genome_list = []
+    for root, dirs, files in os.walk(dirname):
+        for genome in files:
+            genome_list.append(RecurrentNetwork.load(Path(root) / genome))
+    return genome_list
+
+def run_simulation():
+    supervisor = SimulationManager()
     # Teleport redEnd and greenStart at the start of each generation
-    print("Teleporting objects for new generation...")
-    new_red_end_position = supervisor.get_random_road_position()
-    new_green_start_position = supervisor.get_random_road_position()
-    while new_red_end_position == new_green_start_position:
-        new_red_end_position = supervisor.get_random_road_position()
-        new_green_start_position = supervisor.get_random_road_position()
+    supervisor.randomize_goals()
+    # Get the parent directory dynamically
+    current_directory = os.path.dirname(__file__)  # Directory of the current script
+    grandpa_directory = os.path.abspath(os.path.join(current_directory, "..", ".."))  # Navigate to parent directory
+    # Construct the path to the genome data file
+    genome_data_path = os.path.join(grandpa_directory, "genome_data/" f"genome_data{supervisor.port}")
 
-    supervisor.teleport_object(supervisor.end_obj, new_red_end_position)
-    supervisor.teleport_object(supervisor.green_start, new_green_start_position)
-
-    try:
-        supervisor.reset_simulation_state()  # Reset simulation for each genome
-        fitness = supervisor.evaluate_genome(model)
-        print(f"Genome fitness: {fitness}")
-    except Exception as e:
-        print(f"Error evaluating genome: {e}")
-
-
-def run_neat():
-    local_dir = os.path.dirname(__file__)
-    config_path = os.path.join(local_dir, 'config-feedforward.txt')
-    if not os.path.exists(config_path):
-        print(f"Configuration file not found at {config_path}")
-        return
-
-    config = neat.Config(neat.DefaultGenome, neat.DefaultReproduction,
-                         neat.DefaultSpeciesSet, neat.DefaultStagnation,
-                         config_path)
-    with open('/Users/ayaan/Documents/ECar_Sim/WebotsSimulaiton_Multithreaded/bestBest/lebron93.pkl', 'rb') as f:
-        fitness_score, genome = pickle.load(f)
-        print(f"Trained fitness score: {fitness_score}")
-    model = neat.nn.RecurrentNetwork.create(genome, config)
-    for i in range(50):
-        eval_genomes(model, config)
-
+    # Load all the genome data
+    batch = loadall(genome_data_path)
+    for genome in batch:
+        supervisor.reset_simulation_state()
+        fitness = supervisor.evaluate_genome(genome)
+        genome.fitness = fitness
+        print(genome.fitness)
 
 if __name__ == '__main__':
-    # Create a single global supervisor instance
-    supervisor = NEATTester()
-    run_neat()
+    run_simulation()
