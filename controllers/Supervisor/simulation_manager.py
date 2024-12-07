@@ -33,33 +33,46 @@ class SimulationManager:
         self.simulation.previous_distance = current_distance
         return reward
 
-    def evaluate_single_trial(self, genome):
-        """Evaluate a single trial based on distance from start, with soft resets."""
-        genome.hidden_state = None  # Reset RNN state
-
-        while self.simulation.time < self.max_simulation_time:
-            # Get inputs and run network
-            inputs = self.simulation.get_inputs()
-            outputs = genome.forward(inputs)
-            self.simulation.set_controls(outputs)
-
-            # If car goes off road, perform soft reset
-            if not self.simulation.step():
-                self.simulation.car.position = self.simulation.start.position
-                continue
-
-        return self.calculate_distance_from_start()
-
     def evaluate_genome(self, genome):
-        """Evaluate a genome over multiple trials and return median fitness."""
-        trial_fitnesses = []
+        """Modified to include REINFORCE training during episode"""
+        self.simulation.reset()
+        genome.reset()
 
-        for trial in range(self.num_trials):
-            self.reset_simulation_state()
-            trial_fitness = self.evaluate_single_trial(genome)
-            trial_fitnesses.append(trial_fitness)
+        total_distance = 0
+        episode_steps = 0
+        max_steps = 1000
 
-        return float(np.mean(trial_fitnesses))
+        while episode_steps < max_steps:
+            # Get current state and optimal angle
+            state = self.simulation.get_inputs()
+            optimal_angle = self.simulation.get_optimal_orientation()
+
+            # Get action from network
+            angle = genome.select_action(state, optimal_angle)
+
+            # Convert angle to controls (speed and steering)
+            speed = self.simulation.max_speed * 0.5  # Constant speed for simplicity
+            current_angle = self.simulation.car.rotation
+            angle_diff = self.simulation.normalize_angle(angle - current_angle)
+            steering = np.clip(angle_diff / self.simulation.max_steering_angle, -1, 1)
+
+            # Set controls and step simulation
+            self.simulation.set_controls([speed, steering])
+            if not self.simulation.step():
+                break
+
+            # Check if goal reached
+            if self.simulation.reached_goal():
+                break
+
+            episode_steps += 1
+
+        # Train network using collected experience
+        genome.train_episode()
+
+        # Final fitness based on distance to goal
+        final_distance = self.simulation.calculate_distance_to_goal()
+        return -final_distance  # Negative because we want to minimize distance
 
     def visualize_network(self, genome: RecurrentNetwork, save_path: str = "visualization.html"):
         # Load the HTML template
