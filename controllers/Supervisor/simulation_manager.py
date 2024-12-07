@@ -33,20 +33,59 @@ class SimulationManager:
         return reward
 
     def evaluate_genome(self, genome):
-        """Modified to use distance from start as fitness"""
+        """Evaluate genome using shortest path distance to goal along roads"""
         self.simulation.reset()
         genome.reset()
 
-        total_distance = 0
+        total_fitness = 0
         episode_steps = 0
         max_steps = 1000
+
+        # Helper function to estimate path distance along roads
+        def estimate_path_distance(pos1, pos2):
+            """Estimate shortest path distance between two points along roads"""
+            # Find nearest roads to start and end points
+            def find_nearest_roads(x, y):
+                v_dists = [(abs(road.position[0] - x), road.position[0])
+                           for road in self.simulation.vertical_roads]
+                h_dists = [(abs(road.position[1] - y), road.position[1])
+                           for road in self.simulation.horizontal_roads]
+                nearest_v = min(v_dists, key=lambda x: x[0])[1]
+                nearest_h = min(h_dists, key=lambda x: x[0])[1]
+                return nearest_v, nearest_h
+
+            x1, y1 = pos1
+            x2, y2 = pos2
+            v1, h1 = find_nearest_roads(x1, y1)
+            v2, h2 = find_nearest_roads(x2, y2)
+
+            # Calculate path segments
+            # 1. Distance to nearest intersection
+            d1 = min(abs(x1 - v1) + abs(y1 - h1),  # Distance to nearest intersection
+                     abs(x1 - v2) + abs(y1 - h1),   # Distance to goal's vertical road
+                     abs(x1 - v1) + abs(y1 - h2))   # Distance to goal's horizontal road
+
+            # 2. Distance along roads to goal
+            d2 = abs(v2 - v1) + abs(h2 - h1)  # Manhattan distance between intersections
+
+            # 3. Distance from last intersection to goal
+            d3 = abs(x2 - v2) + abs(y2 - h2)
+
+            return d1 + d2 + d3
+
+        # Initial path distance to goal
+        initial_path_dist = estimate_path_distance(
+            self.simulation.car.position,
+            self.simulation.end.position
+        )
+        last_path_dist = initial_path_dist
 
         while episode_steps < max_steps:
             # Get current state and optimal angle
             state = self.simulation.get_inputs()
             optimal_angle = self.simulation.get_optimal_orientation()
 
-            # Get action from network - returns (speed, angle)
+            # Get action from network
             speed, angle = genome.select_action(state, optimal_angle)
 
             # Convert angle to steering
@@ -59,8 +98,20 @@ class SimulationManager:
             if not self.simulation.step():  # Car went off road
                 break
 
+            # Calculate current path distance to goal
+            current_path_dist = estimate_path_distance(
+                self.simulation.car.position,
+                self.simulation.end.position
+            )
+
+            # Calculate reward based on path distance improvement
+            path_improvement = last_path_dist - current_path_dist
+            total_fitness += path_improvement
+            last_path_dist = current_path_dist
+
             # Check if goal reached
             if self.simulation.reached_goal():
+                total_fitness += 1000  # Bonus for reaching goal
                 break
 
             episode_steps += 1
@@ -68,13 +119,8 @@ class SimulationManager:
         # Train network using collected experience
         genome.train_episode()
 
-        # Calculate distance from start
-        dx = self.simulation.car.position[0] - self.simulation.start.position[0]
-        dy = self.simulation.car.position[1] - self.simulation.start.position[1]
-        distance_from_start = np.sqrt(dx * dx + dy * dy)
-
-        # Return distance from start as fitness (positive since we want to maximize it)
-        return distance_from_start
+        # Return normalized fitness score
+        return total_fitness / initial_path_dist if initial_path_dist > 0 else 0
 
     def visualize_network(self, genome: RecurrentNetwork, save_path: str = "visualization.html"):
         # Load the HTML template

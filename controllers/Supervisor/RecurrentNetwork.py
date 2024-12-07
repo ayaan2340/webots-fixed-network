@@ -162,30 +162,57 @@ class RecurrentNetwork(nn.Module):
     @staticmethod
     def load(path, **kwargs):
         """
-        Load a network from a saved file.
+        Load a network from a saved file, handling both state_dict and full model saves.
 
         Args:
             path: Path to the saved network file
+            **kwargs: Network parameters (input_size, hidden_size, etc.) needed if loading state_dict
 
         Returns:
             RecurrentNetwork: Loaded network with weights restored
         """
-        saved_data = torch.load(path)
+        try:
+            saved_data = torch.load(path)
 
-        # Handle case where saved data is a dictionary with genome params
-        if isinstance(saved_data, dict) and 'genome' in saved_data:
-            # Create a new network with default parameters
-            # Note: This assumes we know the architecture. You might need to
-            # store/load these parameters separately if they vary
-            network = RecurrentNetwork(**kwargs)
+            # Case 1: Loading just a state dictionary or parameters
+            if isinstance(saved_data, dict):
+                if not all(k in kwargs for k in ['input_size',
+                           'hidden_size', 'output_size', 'genome_id']):
+                    raise ValueError("When loading from state_dict, must provide input_size, "
+                                     "hidden_size, output_size, and genome_id as kwargs")
 
-            # Load the state dict from the saved genome parameters
-            network.load_state_dict(saved_data['genome'])
+                # Create a new network with provided parameters
+                network = RecurrentNetwork(
+                    input_size=kwargs['input_size'],
+                    hidden_size=kwargs['hidden_size'],
+                    output_size=kwargs['output_size'],
+                    genome_id=kwargs['genome_id'],
+                    crossover_prob=kwargs.get('crossover_prob', 0.25),
+                    mutation_rate=kwargs.get('mutation_rate', 0.25),
+                    mutation_strength=kwargs.get('mutation_strength', 0.1),
+                    learning_rate=kwargs.get('learning_rate', 0.001)
+                )
 
-            # Store the fitness score as an attribute
-            network.fitness_score = saved_data['fitness']
+                # If it's a genome dictionary with additional data
+                if 'genome' in saved_data:
+                    network.load_state_dict(saved_data['genome'])
+                    if 'fitness' in saved_data:
+                        network.fitness_score = saved_data['fitness']
+                else:
+                    # Direct state dict loading
+                    network.load_state_dict(saved_data)
 
-            return network
+                return network
 
-        # Handle case where saved data is the network itself (old format)
-        return saved_data
+            # Case 2: Loading a full model
+            elif isinstance(saved_data, RecurrentNetwork):
+                return saved_data
+
+            else:
+                raise ValueError(f"Unexpected data type in saved file: {type(saved_data)}")
+
+        except Exception as e:
+            print(f"Debug - Saved data type: {type(saved_data)}")
+            print(
+                f"Debug - Saved data keys (if dict): {saved_data.keys() if isinstance(saved_data, dict) else 'Not a dict'}")
+            raise Exception(f"Error loading model from {path}: {str(e)}")
