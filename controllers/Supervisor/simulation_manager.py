@@ -17,7 +17,6 @@ class SimulationManager:
     def reset_simulation_state(self):
         """Reset the simulation to initial state."""
         self.simulation = Simulation()
-        self.simulation.create_checkpoints()
         self.simulation.reset()
 
     def calculate_distance_from_start(self):
@@ -34,7 +33,7 @@ class SimulationManager:
         return reward
 
     def evaluate_genome(self, genome):
-        """Modified to include REINFORCE training during episode"""
+        """Modified to use distance from start as fitness"""
         self.simulation.reset()
         genome.reset()
 
@@ -47,18 +46,17 @@ class SimulationManager:
             state = self.simulation.get_inputs()
             optimal_angle = self.simulation.get_optimal_orientation()
 
-            # Get action from network
-            angle = genome.select_action(state, optimal_angle)
+            # Get action from network - returns (speed, angle)
+            speed, angle = genome.select_action(state, optimal_angle)
 
-            # Convert angle to controls (speed and steering)
-            speed = self.simulation.max_speed * 0.5  # Constant speed for simplicity
+            # Convert angle to steering
             current_angle = self.simulation.car.rotation
             angle_diff = self.simulation.normalize_angle(angle - current_angle)
             steering = np.clip(angle_diff / self.simulation.max_steering_angle, -1, 1)
 
             # Set controls and step simulation
             self.simulation.set_controls([speed, steering])
-            if not self.simulation.step():
+            if not self.simulation.step():  # Car went off road
                 break
 
             # Check if goal reached
@@ -70,9 +68,13 @@ class SimulationManager:
         # Train network using collected experience
         genome.train_episode()
 
-        # Final fitness based on distance to goal
-        final_distance = self.simulation.calculate_distance_to_goal()
-        return -final_distance  # Negative because we want to minimize distance
+        # Calculate distance from start
+        dx = self.simulation.car.position[0] - self.simulation.start.position[0]
+        dy = self.simulation.car.position[1] - self.simulation.start.position[1]
+        distance_from_start = np.sqrt(dx * dx + dy * dy)
+
+        # Return distance from start as fitness (positive since we want to maximize it)
+        return distance_from_start
 
     def visualize_network(self, genome: RecurrentNetwork, save_path: str = "visualization.html"):
         # Load the HTML template

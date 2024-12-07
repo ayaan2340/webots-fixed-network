@@ -119,14 +119,13 @@ class RecurrentNetwork(nn.Module):
         child = RecurrentNetwork(
             input_size=self.input_layer.in_features,
             hidden_size=self.hidden_size,
-            output_size=self.output_layer.out_features,
+            output_size=2,  # Combined size for angle and speed outputs
             genome_id=genome_id,
-            crossover_prob=self.crossover_prob
+            crossover_prob=self.crossover_prob,
+            mutation_rate=self.mutation_rate,
+            mutation_strength=self.mutation_strength,
+            learning_rate=self.optimizer.param_groups[0]['lr']
         )
-        # Create new optimizer for child
-        child.optimizer = torch.optim.Adam(
-            child.parameters(),
-            lr=child.optimizer.param_groups[0]['lr'])
         return child
 
     def mutate(self):

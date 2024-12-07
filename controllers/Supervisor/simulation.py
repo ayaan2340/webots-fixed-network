@@ -4,7 +4,12 @@ import random
 import numpy as np
 import torch
 import logging
+import os
+
+# fmt: off
+os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = "hide"
 import pygame
+# fmt: on
 
 
 EPS = 1e-10
@@ -137,7 +142,6 @@ class Simulation:
     def reset(self):
         """Reset the simulation state."""
         self.randomize_goals()
-        self.create_checkpoints()
         self.time = 0.0
         self.speed = 0.0
         self.steering_angle = 0.0
@@ -223,14 +227,9 @@ class Simulation:
         )
 
     def get_angle_to_goal(self) -> float:
-
-        if not self.checkpoint_reached:
-            goal_position = self.checkpoints[self.current_checkpoint_index]
-        else:
-            goal_position = self.end.position
         """Calculate angle between car's heading and goal."""
-        dx = goal_position[0] - self.car.position[0]
-        dy = goal_position[1] - self.car.position[1]
+        dx = self.end.position[0] - self.car.position[0]
+        dy = self.end.position[1] - self.car.position[1]
         goal_angle = np.arctan2(dy, dx)
         return self.normalize_angle(goal_angle - self.car.rotation)
 
@@ -428,42 +427,24 @@ class Simulation:
 
         self.time += self.time_step
         self.draw()
-        return self.am_on_road()
+
+        # Check if car is on road
+        if not self.am_on_road():
+            self.soft_reset()
+            return True  # Continue simulation
+        return True  # Always return True since we handle off-road with soft reset
+
+    def soft_reset(self):
+        """Reset car position and orientation while keeping simulation running."""
+        # Place car back at start position
+        self.car.position = self.start.position
+        # Randomize orientation
+        self.car.rotation = random.uniform(-np.pi, np.pi)
+        # Reset speed and steering
+        self.speed = 0.0
+        self.steering_angle = 0.0
 
     def reached_goal(self) -> bool:
         """Check if car has reached the goal."""
         distance = self.calculate_distance_to_goal()
         return distance < 2.0  # 2 units tolerance
-
-    def create_checkpoints(self):
-        """
-        Create multiple checkpoints along the route.
-        Ensure that checkpoints are placed at intersections along the optimal path.
-        """
-        # Possible intersection positions as checkpoints
-        intersection_positions = [(30, 30), (60, 60), (90, 90), (120, 120)]
-
-        # Make sure the start and end positions are distinct and not overlapping
-        if not self.start.position or not self.end.position:
-            raise ValueError("Start and end positions must be defined before creating checkpoints.")
-
-        # Sort intersections by distance from the start to create an ordered route
-        sorted_intersections = sorted(
-            intersection_positions,
-            key=lambda pos: np.linalg.norm(
-                np.array(pos) -
-                np.array(
-                    self.start.position)))
-
-        # Select checkpoints that lie between the start and end positions
-        checkpoints = []
-        for intersection in sorted_intersections:
-            if (
-                np.linalg.norm(np.array(intersection) - np.array(self.start.position)) > 2.0 and
-                np.linalg.norm(np.array(intersection) - np.array(self.end.position)) > 2.0
-            ):
-                checkpoints.append(intersection)
-
-        # Set checkpoints for the simulation (excluding start and end positions)
-        self.checkpoints = checkpoints
-        logging.info(f"Checkpoints created: {self.checkpoints}")
