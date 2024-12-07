@@ -32,95 +32,99 @@ class SimulationManager:
         self.simulation.previous_distance = current_distance
         return reward
 
-    def evaluate_genome(self, genome):
-        """Evaluate genome using shortest path distance to goal along roads"""
-        self.simulation.reset()
-        genome.reset()
+    def evaluate_genome(self, genome, num_trials=None):
+        """Evaluate genome using shortest path distance to goal along roads over multiple trials"""
+        if num_trials is None:
+            num_trials = self.num_trials
 
-        total_fitness = 0
-        episode_steps = 0
-        max_steps = 1000
+        total_fitness_across_trials = 0
 
-        # Helper function to estimate path distance along roads
-        def estimate_path_distance(pos1, pos2):
-            """Estimate shortest path distance between two points along roads"""
-            # Find nearest roads to start and end points
-            def find_nearest_roads(x, y):
-                v_dists = [(abs(road.position[0] - x), road.position[0])
-                           for road in self.simulation.vertical_roads]
-                h_dists = [(abs(road.position[1] - y), road.position[1])
-                           for road in self.simulation.horizontal_roads]
-                nearest_v = min(v_dists, key=lambda x: x[0])[1]
-                nearest_h = min(h_dists, key=lambda x: x[0])[1]
-                return nearest_v, nearest_h
+        for _ in range(num_trials):
+            self.simulation.reset()
+            genome.reset()
 
-            x1, y1 = pos1
-            x2, y2 = pos2
-            v1, h1 = find_nearest_roads(x1, y1)
-            v2, h2 = find_nearest_roads(x2, y2)
+            total_fitness = 0
+            episode_steps = 0
+            max_steps = 1000
 
-            # Calculate path segments
-            # 1. Distance to nearest intersection
-            d1 = min(abs(x1 - v1) + abs(y1 - h1),  # Distance to nearest intersection
-                     abs(x1 - v2) + abs(y1 - h1),   # Distance to goal's vertical road
-                     abs(x1 - v1) + abs(y1 - h2))   # Distance to goal's horizontal road
+            # Helper function to estimate path distance along roads
+            def estimate_path_distance(pos1, pos2):
+                """Estimate shortest path distance between two points along roads"""
+                # Find nearest roads to start and end points
+                def find_nearest_roads(x, y):
+                    v_dists = [(abs(road.position[0] - x), road.position[0])
+                               for road in self.simulation.vertical_roads]
+                    h_dists = [(abs(road.position[1] - y), road.position[1])
+                               for road in self.simulation.horizontal_roads]
+                    nearest_v = min(v_dists, key=lambda x: x[0])[1]
+                    nearest_h = min(h_dists, key=lambda x: x[0])[1]
+                    return nearest_v, nearest_h
 
-            # 2. Distance along roads to goal
-            d2 = abs(v2 - v1) + abs(h2 - h1)  # Manhattan distance between intersections
+                x1, y1 = pos1
+                x2, y2 = pos2
+                v1, h1 = find_nearest_roads(x1, y1)
+                v2, h2 = find_nearest_roads(x2, y2)
 
-            # 3. Distance from last intersection to goal
-            d3 = abs(x2 - v2) + abs(y2 - h2)
+                # Calculate path segments
+                # 1. Distance to nearest intersection
+                d1 = min(abs(x1 - v1) + abs(y1 - h1),  # Distance to nearest intersection
+                         abs(x1 - v2) + abs(y1 - h1),   # Distance to goal's vertical road
+                         abs(x1 - v1) + abs(y1 - h2))   # Distance to goal's horizontal road
 
-            return d1 + d2 + d3
+                # 2. Distance along roads to goal
+                d2 = abs(v2 - v1) + abs(h2 - h1)  # Manhattan distance between intersections
 
-        # Initial path distance to goal
-        initial_path_dist = estimate_path_distance(
-            self.simulation.car.position,
-            self.simulation.end.position
-        )
-        last_path_dist = initial_path_dist
+                # 3. Distance from last intersection to goal
+                d3 = abs(x2 - v2) + abs(y2 - h2)
 
-        while episode_steps < max_steps:
-            # Get current state and optimal angle
-            state = self.simulation.get_inputs()
-            optimal_angle = self.simulation.get_optimal_orientation()
+                return d1 + d2 + d3
 
-            # Get action from network
-            speed, angle = genome.select_action(state, optimal_angle)
-
-            # Convert angle to steering
-            current_angle = self.simulation.car.rotation
-            angle_diff = self.simulation.normalize_angle(angle - current_angle)
-            steering = np.clip(angle_diff / self.simulation.max_steering_angle, -1, 1)
-
-            # Set controls and step simulation
-            self.simulation.set_controls([speed, steering])
-            if not self.simulation.step():  # Car went off road
-                break
-
-            # Calculate current path distance to goal
-            current_path_dist = estimate_path_distance(
+            # Initial path distance to goal
+            initial_path_dist = estimate_path_distance(
                 self.simulation.car.position,
                 self.simulation.end.position
             )
+            last_path_dist = initial_path_dist
 
-            # Calculate reward based on path distance improvement
-            path_improvement = last_path_dist - current_path_dist
-            total_fitness += path_improvement
-            last_path_dist = current_path_dist
+            while episode_steps < max_steps:
+                # ... (existing episode loop code) ...
+                state = self.simulation.get_inputs()
+                optimal_angle = self.simulation.get_optimal_orientation()
 
-            # Check if goal reached
-            if self.simulation.reached_goal():
-                total_fitness += 1000  # Bonus for reaching goal
-                break
+                speed, angle = genome.select_action(state, optimal_angle)
 
-            episode_steps += 1
+                current_angle = self.simulation.car.rotation
+                angle_diff = self.simulation.normalize_angle(angle - current_angle)
+                steering = np.clip(angle_diff / self.simulation.max_steering_angle, -1, 1)
 
-        # Train network using collected experience
-        genome.train_episode()
+                self.simulation.set_controls([speed, steering])
+                if not self.simulation.step():
+                    break
 
-        # Return normalized fitness score
-        return total_fitness / initial_path_dist if initial_path_dist > 0 else 0
+                current_path_dist = estimate_path_distance(
+                    self.simulation.car.position,
+                    self.simulation.end.position
+                )
+
+                path_improvement = last_path_dist - current_path_dist
+                total_fitness += path_improvement
+                last_path_dist = current_path_dist
+
+                if self.simulation.reached_goal():
+                    total_fitness += 1000  # Bonus for reaching goal
+                    break
+
+                episode_steps += 1
+
+            # Normalize fitness for this trial
+            normalized_trial_fitness = total_fitness / initial_path_dist if initial_path_dist > 0 else 0
+            total_fitness_across_trials += normalized_trial_fitness
+
+            # Train network using collected experience after each trial
+            genome.train_episode()
+
+        # Return average fitness across all trials
+        return total_fitness_across_trials / num_trials
 
     def visualize_network(self, genome: RecurrentNetwork, save_path: str = "visualization.html"):
         # Load the HTML template
